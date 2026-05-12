@@ -39,6 +39,32 @@ export function attachPasteHandler(
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
+    // Image items take priority (copied image or screenshot)
+    const imageItem = Array.from(clipboardData.items).find(
+      (item) => item.type.startsWith("image/"),
+    );
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        const blobUrl = URL.createObjectURL(file);
+        const state = engine.getState();
+        const merged = { ...state.doc };
+        const tr = createTransaction();
+        const sel = state.selection;
+        const blockPath = sel ? [sel.anchor.path[0]] : [state.doc.children.length - 1];
+        const insertIdx = blockPath[0] + 1;
+        tr.steps.push({
+          type: "insert_node",
+          parentPath: [],
+          index: insertIdx,
+          node: { type: "image", attrs: { src: blobUrl, alt: file.name }, children: [] },
+        });
+        engine.dispatch(tr);
+        void merged; // suppress unused warning
+        return;
+      }
+    }
+
     const html = clipboardData.getData("text/html");
     const plainText = clipboardData.getData("text/plain");
 
@@ -47,7 +73,17 @@ export function attachPasteHandler(
       const sanitized = sanitizeHTML(html);
       newDoc = htmlSerializer.deserialize(sanitized);
     } else if (plainText) {
-      newDoc = htmlSerializer.deserialize(`<p>${escapeHTML(plainText)}</p>`);
+      // Auto-link: if the entire pasted plain text is a URL, wrap it in <a>
+      const trimmed = plainText.trim();
+      if (isURL(trimmed)) {
+        const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        const escaped = escapeHTML(trimmed);
+        newDoc = htmlSerializer.deserialize(
+          `<p><a href="${escapeAttr(href)}">${escaped}</a></p>`,
+        );
+      } else {
+        newDoc = htmlSerializer.deserialize(`<p>${escapeHTML(plainText)}</p>`);
+      }
     } else {
       return;
     }
@@ -101,4 +137,20 @@ function sanitizeHTML(html: string): string {
 
 function escapeHTML(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttr(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+const URL_RE = /^(https?:\/\/|www\.)[^\s]{2,}$/i;
+
+function isURL(text: string): boolean {
+  if (!URL_RE.test(text)) return false;
+  try {
+    new URL(text.startsWith('http') ? text : `https://${text}`);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -193,16 +193,45 @@ function renderCodeBlock(node: BlockNode, path: number[]): HTMLElement {
 function renderImage(node: BlockNode, path: number[]): HTMLElement {
   const wrapper = document.createElement('figure');
   wrapper.dataset.blockPath = JSON.stringify(path);
-  wrapper.className = 'editor-image-wrapper';
+  wrapper.dataset.imagePath = JSON.stringify(path);
   wrapper.contentEditable = 'false';
+
+  const align = node.attrs?.align as string | undefined;
+  wrapper.className = [
+    'editor-image-wrapper',
+    align === 'center' ? 'editor-image-center' : '',
+    align === 'right'  ? 'editor-image-right'  : '',
+    align === 'left'   ? 'editor-image-left'   : '',
+  ].filter(Boolean).join(' ');
 
   const img = document.createElement('img');
   img.src = (node.attrs?.src as string) ?? '';
   img.alt = (node.attrs?.alt as string) ?? '';
   img.className = 'editor-image';
-  img.draggable = true;
+  img.draggable = false;
+  if (node.attrs?.width) (img as HTMLImageElement).style.width = `${node.attrs.width as number}px`;
 
   wrapper.appendChild(img);
+
+  // Caption
+  const caption = node.attrs?.caption as string | undefined;
+  if (caption !== undefined) {
+    const figcaption = document.createElement('figcaption');
+    figcaption.className = 'editor-image-caption';
+    figcaption.textContent = caption;
+    wrapper.appendChild(figcaption);
+  }
+
+  // Resize handles (corners) — shown only when wrapper[data-selected]
+  for (const pos of ['nw', 'ne', 'sw', 'se'] as const) {
+    const handle = document.createElement('div');
+    handle.className = `editor-image-resize-handle editor-image-resize-${pos}`;
+    handle.contentEditable = 'false';
+    handle.dataset.resizeImagePath = JSON.stringify(path);
+    handle.dataset.resizeImagePos = pos;
+    wrapper.appendChild(handle);
+  }
+
   return wrapper;
 }
 

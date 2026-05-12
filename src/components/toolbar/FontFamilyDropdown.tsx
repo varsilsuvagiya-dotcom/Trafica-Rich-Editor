@@ -168,45 +168,10 @@ export function FontFamilyDropdown({ engine, activeFontFamily }: FontFamilyDropd
             );
           })}
 
-          <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+          {/* <div className="my-1 border-t border-gray-100 dark:border-gray-700" /> */}
 
           {/* Custom font */}
-          {showCustomInput ? (
-            <div className="px-3 py-2 flex gap-1.5">
-              <input
-                ref={customInputRef}
-                type="text"
-                value={customValue}
-                onChange={(e) => setCustomValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); applyCustom(); }
-                  if (e.key === 'Escape') { e.preventDefault(); setShowCustomInput(false); }
-                }}
-                placeholder="Font name…"
-                className="flex-1 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
-              />
-              <button
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); applyCustom(); }}
-                className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 whitespace-nowrap"
-              >
-                Apply
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setCustomValue('');
-                setShowCustomInput(true);
-              }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-            >
-              <PlusIcon />
-              Custom Font
-            </button>
-          )}
+         
         </div>
       )}
     </div>

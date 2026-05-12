@@ -69,6 +69,8 @@ export interface NodeAttrs {
   level?: 1 | 2 | 3 | 4 | 5 | 6; // for headings
   src?: string;                     // for images
   alt?: string;
+  caption?: string;                 // for images
+  width?: number;                   // for images (px)
   start?: number;                   // for ordered lists
   language?: string;                // for code blocks
   align?: AlignmentType;            // text alignment

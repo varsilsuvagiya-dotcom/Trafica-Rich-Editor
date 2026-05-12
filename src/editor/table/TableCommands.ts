@@ -233,6 +233,36 @@ export const deleteTable: Command = (engine) => {
   return true;
 };
 
+// ─── Header Row Toggle ────────────────────────────────────────────────────────
+
+export function toggleHeaderRow(tablePath: number[]): Command {
+  return (engine) => {
+    const state = engine.getState();
+    const table = getNodeAtPath(state.doc, tablePath) as BlockNode;
+    if (!table) return false;
+
+    const rows = table.children as BlockNode[];
+    if (rows.length === 0) return false;
+
+    const firstRow = rows[0];
+    const hasHeader = (firstRow.children as BlockNode[]).some((c) => c.type === 'table_header');
+    const newType = hasHeader ? 'table_cell' : 'table_header';
+
+    const newFirstRow: BlockNode = {
+      ...firstRow,
+      children: (firstRow.children as BlockNode[]).map((cell) => ({
+        ...cell,
+        type: newType,
+      })),
+    };
+    const newTable: BlockNode = {
+      ...table,
+      children: [newFirstRow, ...rows.slice(1)],
+    };
+    return replaceTable(engine, tablePath, newTable);
+  };
+}
+
 // ─── Column Resize ────────────────────────────────────────────────────────────
 
 export function setColumnWidth(tablePath: number[], colIndex: number, width: number): Command {

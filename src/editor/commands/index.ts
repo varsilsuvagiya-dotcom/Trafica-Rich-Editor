@@ -46,10 +46,12 @@ import {
   normalizeRange,
   getNodeAtPath,
   createParagraph,
+  marksEqual,
 } from '../core/DocumentModel';
 
 import {
   getActiveMarks,
+  getActiveLinkRange,
   makePosition,
   makeCollapsedSelection,
 } from '../selection/SelectionEngine';
@@ -68,20 +70,25 @@ export function toggleMark(markType: MarkType, attrs?: Record<string, unknown>):
     const selection = state.selection ?? makeCollapsedSelection(makePosition([0], 0));
 
     const mark: Mark = { type: markType, attrs: attrs as Mark['attrs'] };
-    const activeMarks = getActiveMarks(doc, selection);
-    const isActive = activeMarks.has(markType);
 
     const tr = createTransaction();
     if (!state.selection) tr.steps.push(tr_setSelection(selection));
 
     if (selection.isCollapsed) {
-      // No range selected: store as pending mark for next character typed
-      tr.meta.pendingMarks = isActive
+      // Collapsed cursor: toggle against pending marks (state.marks), NOT the
+      // text node at cursor. getActiveMarks reads the text node which never
+      // reflects pending marks set before typing — using it here caused the
+      // mark to keep accumulating instead of toggling off.
+      const isPendingActive = state.marks.some((m) => m.type === markType);
+      tr.meta.pendingMarks = isPendingActive
         ? state.marks.filter((m) => m.type !== markType)
         : [...state.marks, mark];
       engine.dispatch(tr);
       return true;
     }
+
+    const activeMarks = getActiveMarks(doc, selection);
+    const isActive = activeMarks.has(markType);
 
     const from = selection.anchor;
     const to = selection.focus;
@@ -379,8 +386,30 @@ export function insertText(text: string): Command {
     // (empty paragraph), the cursor lands at [...blockPath, 0] after insertion.
     const node = getNodeAtPath(doc, insertAt.path);
     const isAtBlock = !node || !isTextNode(node as EditorNode);
-    const cursorPath = isAtBlock ? [...insertAt.path, 0] : insertAt.path;
-    const cursorOffset = isAtBlock ? text.length : insertAt.offset + text.length;
+    let cursorPath: number[];
+    let cursorOffset: number;
+
+    if (isAtBlock) {
+      cursorPath = [...insertAt.path, 0];
+      cursorOffset = text.length;
+    } else {
+      const textNode = node as TextNode;
+      if (marksEqual(textNode.marks, marks)) {
+        // Same marks: text spliced in-place, cursor stays on same node.
+        cursorPath = insertAt.path;
+        cursorOffset = insertAt.offset + text.length;
+      } else {
+        // Different marks: insertTextAtPath splits the node. The new text node
+        // lands at parentPath[nodeIndex + (hasBefore ? 1 : 0)]. Using the
+        // pre-split path here caused set_selection to read the wrong node's
+        // marks, resetting state.marks and breaking continued formatting.
+        const parentPath = insertAt.path.slice(0, -1);
+        const nodeIndex = insertAt.path[insertAt.path.length - 1];
+        const hasBefore = insertAt.offset > 0;
+        cursorPath = [...parentPath, nodeIndex + (hasBefore ? 1 : 0)];
+        cursorOffset = text.length;
+      }
+    }
 
     tr.steps.push(tr_insertText(insertAt.path, insertAt.offset, text, marks));
     tr.steps.push(
@@ -542,25 +571,95 @@ function computeBlockOffset(
 
 // ─── Link ─────────────────────────────────────────────────────────────────────
 
-export function insertLink(href: string, _text?: string): Command {
+/**
+ * Insert or update a link — mirrors CKEditor 5 link behaviour:
+ *
+ * 1. Cursor collapsed, text provided  → insert a new text node with the link
+ *    mark at the cursor position, then place cursor after it.
+ * 2. Cursor collapsed inside existing link → update the href on the whole link
+ *    span (all adjacent same-href nodes) using tr_setMark to avoid duplicates.
+ * 3. Range selected → atomically replace any existing link on that range with
+ *    the new href via tr_setMark (also prevents duplicate <a> tags).
+ */
+export function insertLink(href: string, displayText?: string): Command {
   return (engine) => {
     const state = engine.getState();
-    const { selection } = state;
-    // Requires a text range — applying to a collapsed cursor would mark the wrong node
-    if (!selection || selection.isCollapsed) return false;
+    const { selection, doc, marks } = state;
+    if (!selection) return false;
 
-    const mark: Mark = { type: 'link', attrs: { href } };
+    const linkMark: Mark = { type: 'link', attrs: { href } };
     const tr = createTransaction();
-    tr.steps.push(tr_addMark(selection.anchor, selection.focus, mark));
+
+    // ── Case 1: collapsed cursor ──────────────────────────────────────────────
+    if (selection.isCollapsed) {
+      const linkRange = getActiveLinkRange(doc, selection);
+
+      if (linkRange) {
+        // Update existing link span href atomically
+        tr.steps.push(tr_setMark(linkRange.from, linkRange.to, 'link', linkMark));
+        engine.dispatch(tr);
+        return true;
+      }
+
+      if (displayText && displayText.trim()) {
+        // Insert brand-new linked text at cursor
+        const text = displayText.trim();
+        const insertAt = selection.anchor;
+        const node = getNodeAtPath(doc, insertAt.path);
+        const isAtBlock = !node || !isTextNode(node as EditorNode);
+
+        // Build marks for the new node: current pending marks + link
+        const baseMarks = marks.filter((m) => m.type !== 'link');
+        const newMarks: Mark[] = [...baseMarks, linkMark];
+
+        // Calculate cursor position after insertion (same split-aware logic as insertText)
+        let cursorPath: number[];
+        let cursorOffset: number;
+        if (isAtBlock) {
+          cursorPath = [...insertAt.path, 0];
+          cursorOffset = text.length;
+        } else {
+          const textNode = node as TextNode;
+          if (marksEqual(textNode.marks, newMarks)) {
+            cursorPath = insertAt.path;
+            cursorOffset = insertAt.offset + text.length;
+          } else {
+            const parentPath = insertAt.path.slice(0, -1);
+            const nodeIndex = insertAt.path[insertAt.path.length - 1];
+            const hasBefore = insertAt.offset > 0;
+            cursorPath = [...parentPath, nodeIndex + (hasBefore ? 1 : 0)];
+            cursorOffset = text.length;
+          }
+        }
+
+        tr.steps.push(tr_insertText(insertAt.path, insertAt.offset, text, newMarks));
+        tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition(cursorPath, cursorOffset))));
+        engine.dispatch(tr);
+        return true;
+      }
+
+      // Collapsed with no text and no existing link — nothing to do
+      return false;
+    }
+
+    // ── Case 2: range selected ────────────────────────────────────────────────
+    // tr_setMark atomically removes any existing link mark then adds the new
+    // one in a single pass — prevents nested/duplicate <a> tags.
+    const { from, to } = normalizeRange(selection.anchor, selection.focus);
+    tr.steps.push(tr_setMark(from, to, 'link', linkMark));
+
+    // Restore the selection so the user sees the highlighted text after apply
+    tr.steps.push(tr_setSelection(selection));
     engine.dispatch(tr);
     return true;
   };
 }
 
 /**
- * Remove the link mark from the current selection.
- * If the cursor is collapsed inside a link text node, auto-expands to the
- * full extent of that node before removing so the whole hyperlink is cleared.
+ * Remove the link mark from the whole link span the cursor is inside,
+ * or from the explicit range when text is selected. Uses getActiveLinkRange
+ * to walk sibling nodes with the same href so removing a collapsed-cursor
+ * link clears the entire hyperlink, not just the one text node.
  */
 export const removeLink: Command = (engine) => {
   const state = engine.getState();
@@ -571,10 +670,18 @@ export const removeLink: Command = (engine) => {
   let to = selection.focus;
 
   if (selection.isCollapsed) {
-    const node = getNodeAtPath(doc, selection.anchor.path);
-    if (node && isTextNode(node as EditorNode)) {
-      from = makePosition(selection.anchor.path, 0);
-      to = makePosition(selection.anchor.path, (node as TextNode).text.length);
+    // Expand to full link span (all adjacent nodes sharing the same href)
+    const linkRange = getActiveLinkRange(doc, selection);
+    if (linkRange) {
+      from = linkRange.from;
+      to = linkRange.to;
+    } else {
+      // Fallback: at least cover the current text node
+      const node = getNodeAtPath(doc, selection.anchor.path);
+      if (node && isTextNode(node as EditorNode)) {
+        from = makePosition(selection.anchor.path, 0);
+        to = makePosition(selection.anchor.path, (node as TextNode).text.length);
+      }
     }
   }
 
@@ -722,7 +829,7 @@ export const alignJustify = setAlignment('justify');
 
 // ─── Image ────────────────────────────────────────────────────────────────────
 
-export function insertImage(src: string, alt = ''): Command {
+export function insertImage(src: string, alt = '', extraAttrs?: Record<string, unknown>): Command {
   return (engine) => {
     const state = engine.getState();
     const { selection } = state;
@@ -734,12 +841,46 @@ export function insertImage(src: string, alt = ''): Command {
 
     const imageNode: BlockNode = {
       type: 'image',
-      attrs: { src, alt },
+      attrs: { src, alt, ...extraAttrs },
       children: [],
     };
 
     const tr = createTransaction();
     tr.steps.push({ type: 'insert_node', parentPath, index: insertIdx, node: imageNode });
+    engine.dispatch(tr);
+    return true;
+  };
+}
+
+export function setImageAttr(imagePath: number[], attrs: Record<string, unknown>): Command {
+  return (engine) => {
+    const state = engine.getState();
+    const node = getNodeAtPath(state.doc, imagePath);
+    if (!node || (node as BlockNode).type !== 'image') return false;
+    const updated: BlockNode = {
+      ...(node as BlockNode),
+      attrs: { ...(node as BlockNode).attrs, ...attrs },
+    };
+    const tr = createTransaction();
+    tr.steps.push({ type: 'delete_node', path: imagePath });
+    tr.steps.push({
+      type: 'insert_node',
+      parentPath: imagePath.length > 1 ? imagePath.slice(0, -1) : [],
+      index: imagePath[imagePath.length - 1],
+      node: updated,
+    });
+    engine.dispatch(tr);
+    return true;
+  };
+}
+
+export function deleteImageAtPath(imagePath: number[]): Command {
+  return (engine) => {
+    const state = engine.getState();
+    const node = getNodeAtPath(state.doc, imagePath);
+    if (!node || (node as BlockNode).type !== 'image') return false;
+    const tr = createTransaction();
+    tr.steps.push({ type: 'delete_node', path: imagePath });
     engine.dispatch(tr);
     return true;
   };

@@ -403,6 +403,70 @@ export function getActiveHighlightColor(
  * Collapsed cursor: checks pending marks then the text node at the cursor.
  * Range: returns the family only if every selected text node shares the same one.
  */
+/**
+ * Return the full model range that a link mark occupies starting from the cursor.
+ *
+ * Walks the block's text-node siblings in both directions from the anchor node,
+ * collecting all consecutive nodes that carry the same link href. Returns
+ * {from, to, href} so commands can operate on the whole link span — not just
+ * the node the cursor happens to sit in.
+ *
+ * Returns null when the cursor is not on any link mark.
+ */
+export function getActiveLinkRange(
+  doc: Document,
+  selection: EditorSelection | null,
+): { from: NodePosition; to: NodePosition; href: string } | null {
+  if (!selection) return null;
+
+  const anchorPath = selection.anchor.path;
+  const node = getNodeAtPath(doc, anchorPath);
+  if (!node || !isTextNode(node as EditorNode)) return null;
+
+  const anchorNode = node as TextNode;
+  const linkMark = anchorNode.marks.find((m) => m.type === 'link');
+  if (!linkMark) return null;
+
+  const href = (linkMark.attrs?.href as string) ?? '';
+
+  // Walk sibling text nodes in the same parent block
+  const parentPath = anchorPath.slice(0, -1);
+  const parent = getNodeAtPath(doc, parentPath);
+  if (!parent || isTextNode(parent as EditorNode)) return null;
+
+  const siblings = (parent as import('../../types').BlockNode).children;
+  const anchorIdx = anchorPath[anchorPath.length - 1];
+
+  // Expand left: include preceding siblings with the same link href
+  let startIdx = anchorIdx;
+  while (startIdx > 0) {
+    const prev = siblings[startIdx - 1];
+    if (!prev || !isTextNode(prev as EditorNode)) break;
+    const prevLink = (prev as TextNode).marks.find((m) => m.type === 'link');
+    if (!prevLink || (prevLink.attrs?.href as string) !== href) break;
+    startIdx--;
+  }
+
+  // Expand right: include following siblings with the same link href
+  let endIdx = anchorIdx;
+  while (endIdx < siblings.length - 1) {
+    const next = siblings[endIdx + 1];
+    if (!next || !isTextNode(next as EditorNode)) break;
+    const nextLink = (next as TextNode).marks.find((m) => m.type === 'link');
+    if (!nextLink || (nextLink.attrs?.href as string) !== href) break;
+    endIdx++;
+  }
+
+  const startNode = siblings[startIdx] as TextNode;
+  const endNode = siblings[endIdx] as TextNode;
+
+  return {
+    from: makePosition([...parentPath, startIdx], 0),
+    to: makePosition([...parentPath, endIdx], endNode.text.length),
+    href,
+  };
+}
+
 export function getActiveFontFamily(
   doc: Document,
   selection: EditorSelection | null,

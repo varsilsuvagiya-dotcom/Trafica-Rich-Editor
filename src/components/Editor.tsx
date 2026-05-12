@@ -39,14 +39,17 @@ import {
 import { Toolbar } from './toolbar/Toolbar';
 import { FindReplaceModal } from './FindReplaceModal';
 import { TableContextMenu } from './TableContextMenu';
+import { TableToolbar } from './toolbar/TableToolbar';
+import { ImageToolbar } from './toolbar/ImageToolbar';
 import { getNodeAtPath } from '../editor/core/DocumentModel';
+import { findCellPosition } from '../editor/table/TableModel';
 import { setColumnWidth } from '../editor/table/TableCommands';
 import type { BlockNode } from '../types';
 
 import { htmlSerializer } from '../editor/serialization/HTMLSerializer';
 import { jsonSerializer } from '../editor/serialization/JSONSerializer';
 
-import { insertImage } from '../editor/commands';
+import { insertImage, deleteImageAtPath, setImageAttr } from '../editor/commands';
 
 interface EditorProps {
   engine: EditorEngine;
@@ -55,6 +58,10 @@ interface EditorProps {
   readOnly?: boolean;
   onHTMLChange?: (html: string) => void;
   onJSONChange?: (json: string) => void;
+  /** Called when Ctrl/Cmd+K is pressed — parent opens the link popup */
+  onOpenLinkPopup?: () => void;
+  /** Custom upload handler. Receives a File, returns the final URL. If omitted, blob URLs are used. */
+  onUploadImage?: (file: File) => Promise<string>;
 }
 
 export function Editor({
@@ -64,6 +71,8 @@ export function Editor({
   readOnly = false,
   onHTMLChange,
   onJSONChange,
+  onOpenLinkPopup,
+  onUploadImage: _onUploadImage,
 }: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -72,10 +81,14 @@ export function Editor({
 
   const stateRef = useRef<EditorState>(engine.getState());
 
-  const [showImageDialog,   setShowImageDialog]   = useState(false);
-  const [imageURL,          setImageURL]           = useState('');
+  const [selectedImagePath, setSelectedImagePath] = useState<number[] | null>(null);
   const [findReplaceOpen,   setFindReplaceOpen]    = useState(false);
   const [findReplaceMode,   setFindReplaceMode]    = useState<'find' | 'replace'>('find');
+  const [linkPopupOpen,     setLinkPopupOpen]      = useState(false);
+  const [linkTooltip, setLinkTooltip] = useState<{
+    href: string; x: number; y: number;
+  } | null>(null);
+  const linkTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Table state ─────────────────────────────────────────────────────────────
   const [tableContextMenu, setTableContextMenu] = useState<{
@@ -101,6 +114,11 @@ export function Editor({
   } | null>(null);
 
   const state = useEditorState(engine);
+
+  // Detect cursor inside a table for the floating TableToolbar
+  const inTableCellPos = state.selection
+    ? findCellPosition(state.doc, state.selection.anchor.path)
+    : null;
 
   /*
    * Keep latest state in ref
@@ -277,6 +295,22 @@ export function Editor({
         setFindReplaceOpen(true);
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setLinkPopupOpen(true);
+        onOpenLinkPopup?.();
+        return;
+      }
+
+      // Delete/Backspace on a selected image
+      if (selectedImagePath && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        deleteImageAtPath(selectedImagePath)(engine);
+        setSelectedImagePath(null);
+        return;
+      }
+      // Any key clears image selection so typing resumes normally
+      if (selectedImagePath) setSelectedImagePath(null);
 
       const handled = engine.handleKeyDown(
         e.nativeEvent,
@@ -300,7 +334,7 @@ export function Editor({
         return;
       }
     },
-    [engine, readOnly],
+    [engine, readOnly, onOpenLinkPopup, selectedImagePath],
   );
 
   /*
@@ -373,6 +407,58 @@ export function Editor({
       container.removeEventListener('compositionend', onCompositionEnd);
     };
   }, [engine, readOnly]);
+
+  /*
+   * Link tooltip — show on hover, open on Ctrl+Click
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onMouseOver = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.editor-link');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href') ?? '';
+      if (!href) return;
+      if (linkTooltipTimerRef.current) clearTimeout(linkTooltipTimerRef.current);
+      linkTooltipTimerRef.current = setTimeout(() => {
+        const rect = anchor.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        setLinkTooltip({
+          href,
+          x: rect.left - containerRect.left,
+          y: rect.bottom - containerRect.top + 6,
+        });
+      }, 200);
+    };
+
+    const onMouseOut = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a.editor-link');
+      if (!anchor) return;
+      if (linkTooltipTimerRef.current) clearTimeout(linkTooltipTimerRef.current);
+      setLinkTooltip(null);
+    };
+
+    const onClick = (e: MouseEvent) => {
+      // Ctrl/Cmd + click on a link → open in new tab
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.editor-link');
+      if (!anchor) return;
+      e.preventDefault();
+      const href = anchor.getAttribute('href');
+      if (href) window.open(href, '_blank', 'noopener,noreferrer');
+    };
+
+    container.addEventListener('mouseover', onMouseOver);
+    container.addEventListener('mouseout', onMouseOut);
+    container.addEventListener('click', onClick);
+    return () => {
+      container.removeEventListener('mouseover', onMouseOver);
+      container.removeEventListener('mouseout', onMouseOut);
+      container.removeEventListener('click', onClick);
+      if (linkTooltipTimerRef.current) clearTimeout(linkTooltipTimerRef.current);
+    };
+  }, []);
 
   /*
    * Column resize — document-level mouse tracking while drag is active
@@ -481,6 +567,35 @@ export function Editor({
       if (readOnly) return;
       const target = e.target as HTMLElement;
 
+      // Image resize handle
+      if (target.dataset.resizeImagePath) {
+        e.preventDefault();
+        const imagePath = JSON.parse(target.dataset.resizeImagePath) as number[];
+        const corner = target.dataset.resizeImagePos ?? 'se';
+        const container = containerRef.current;
+        let startWidth = 300;
+        if (container) {
+          const fig = container.querySelector(`[data-image-path="${JSON.stringify(imagePath)}"]`);
+          const img = fig?.querySelector('img') as HTMLImageElement | null;
+          if (img) startWidth = img.getBoundingClientRect().width || 300;
+        }
+        imageResizeRef.current = {
+          imagePath, corner, startX: e.clientX, startY: e.clientY,
+          startWidth, startHeight: 0,
+        };
+        return;
+      }
+
+      // Image click — select image
+      const fig = target.closest('[data-image-path]') as HTMLElement | null;
+      if (fig?.dataset.imagePath) {
+        e.preventDefault();
+        setSelectedImagePath(JSON.parse(fig.dataset.imagePath));
+        return;
+      }
+      // Clear image selection when clicking elsewhere
+      setSelectedImagePath(null);
+
       // Column resize handle
       if ((target as HTMLElement).dataset.resizeTable) {
         e.preventDefault();
@@ -493,7 +608,7 @@ export function Editor({
           const colEl = container.querySelector(
             `col[data-col-index="${colIndex}"]`,
           ) as HTMLElement | null;
-          if (colEl) startWidth = parseInt(colEl.style.width) || 120;
+          if (colEl) startWidth = colEl.getBoundingClientRect().width || 120;
         }
         colResizeRef.current = { tablePath, colIndex, startX: e.clientX, startWidth };
         return;
@@ -554,31 +669,95 @@ export function Editor({
   }, [engine]);
 
   /*
-   * Image dialog
+   * Image resize drag — document-level tracking
    */
-  const handleInsertImage = useCallback(() => {
-    setShowImageDialog(true);
-  }, []);
+  const imageResizeRef = useRef<{
+    imagePath: number[]; corner: string;
+    startX: number; startY: number; startWidth: number; startHeight: number;
+  } | null>(null);
 
-  const confirmInsertImage = useCallback(() => {
-    if (imageURL.trim()) {
-      insertImage(
-        imageURL.trim(),
-        'image',
-      )(engine);
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const drag = imageResizeRef.current;
+      if (!drag) return;
+      const deltaX = e.clientX - drag.startX;
+      const isRight = drag.corner === 'ne' || drag.corner === 'se';
+      const newWidth = Math.max(60, drag.startWidth + (isRight ? deltaX : -deltaX));
+      // Update DOM visually without dispatching
+      const container = containerRef.current;
+      if (container) {
+        const fig = container.querySelector(
+          `[data-image-path="${JSON.stringify(drag.imagePath)}"]`,
+        ) as HTMLElement | null;
+        const img = fig?.querySelector('img') as HTMLImageElement | null;
+        if (img) img.style.width = `${newWidth}px`;
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      const drag = imageResizeRef.current;
+      if (!drag) return;
+      const deltaX = e.clientX - drag.startX;
+      const isRight = drag.corner === 'ne' || drag.corner === 'se';
+      const newWidth = Math.max(60, drag.startWidth + (isRight ? deltaX : -deltaX));
+      imageResizeRef.current = null;
+      setImageAttr(drag.imagePath, { width: newWidth })(engine);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [engine]);
+
+  /*
+   * Apply / remove selected-image highlight in DOM
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.querySelectorAll('[data-image-path]').forEach((el) => {
+      el.removeAttribute('data-selected');
+    });
+    if (selectedImagePath) {
+      const fig = container.querySelector(
+        `[data-image-path="${JSON.stringify(selectedImagePath)}"]`,
+      );
+      if (fig) fig.setAttribute('data-selected', 'true');
     }
+  }, [selectedImagePath, state.doc]);
 
-    setShowImageDialog(false);
-
-    setImageURL('');
-  }, [engine, imageURL]);
+  /*
+   * Drag & drop image files onto the editor canvas
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly) return;
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      if (!file || !file.type.startsWith('image/')) return;
+      const blobUrl = URL.createObjectURL(file);
+      insertImage(blobUrl, file.name.replace(/\.[^.]+$/, ''))(engine);
+    };
+    container.addEventListener('dragover', onDragOver);
+    container.addEventListener('drop', onDrop);
+    return () => {
+      container.removeEventListener('dragover', onDragOver);
+      container.removeEventListener('drop', onDrop);
+    };
+  }, [engine, readOnly]);
 
   /*
    * Empty state
    */
-  const isEmpty = state.doc.children.every(
-    (block) => block.children.length === 0,
-  );
+  const isEmpty =
+    state.doc.children.length === 1 &&
+    state.doc.children[0].type === 'paragraph' &&
+    state.doc.children[0].children.length === 0;
 
   return (
     <div
@@ -587,11 +766,12 @@ export function Editor({
       {!readOnly && (
         <Toolbar
           engine={engine}
-          onInsertImage={handleInsertImage}
           onFindReplace={(mode) => {
             setFindReplaceMode(mode);
             setFindReplaceOpen(true);
           }}
+          linkPopupOpen={linkPopupOpen}
+          onLinkPopupClose={() => setLinkPopupOpen(false)}
         />
       )}
 
@@ -600,7 +780,7 @@ export function Editor({
           <div
             className="
               absolute
-              top-4
+              top-6
               left-6
               pointer-events-none
               select-none
@@ -642,7 +822,34 @@ export function Editor({
               : 'cursor-text',
           ].join(' ')}
         />
+
+        {/* Link hover tooltip */}
+        {linkTooltip && (
+          <div
+            role="tooltip"
+            style={{ left: linkTooltip.x, top: linkTooltip.y }}
+            className="absolute z-50 pointer-events-none flex items-center gap-1.5 bg-gray-900 dark:bg-gray-700 text-white text-xs px-2.5 py-1.5 rounded shadow-lg max-w-xs"
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="shrink-0 opacity-70" aria-hidden="true">
+              <path d="M6.5 3.5H4A2.5 2.5 0 0 0 4 8.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              <path d="M9.5 3.5H12A2.5 2.5 0 0 1 12 8.5h-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              <path d="M5.5 6h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+            <span className="truncate">{linkTooltip.href}</span>
+            <span className="shrink-0 opacity-50 ml-1">Ctrl+click to open</span>
+          </div>
+        )}
       </div>
+
+      {inTableCellPos && !readOnly && (
+        <TableToolbar
+          engine={engine}
+          tablePath={inTableCellPos.tablePath}
+          cellPos={{ row: inTableCellPos.row, col: inTableCellPos.col }}
+          tableSelection={tableSelection}
+          editorContainer={containerRef}
+        />
+      )}
 
       {tableContextMenu && (
         <TableContextMenu
@@ -667,118 +874,13 @@ export function Editor({
         />
       )}
 
-      {showImageDialog && (
-        <div
-          className="
-            fixed
-            inset-0
-            z-50
-            flex
-            items-center
-            justify-center
-            bg-black/50
-          "
-          onClick={() =>
-            setShowImageDialog(false)
-          }
-        >
-          <div
-            className="
-              w-96
-              rounded-lg
-              bg-white
-              p-6
-              shadow-xl
-              dark:bg-gray-800
-            "
-            onClick={(e) =>
-              e.stopPropagation()
-            }
-          >
-            <h3
-              className="
-                mb-4
-                text-lg
-                font-semibold
-                text-gray-900
-                dark:text-gray-100
-              "
-            >
-              Insert Image
-            </h3>
-
-            <input
-              type="url"
-              placeholder="https://example.com/image.jpg"
-              value={imageURL}
-              onChange={(e) =>
-                setImageURL(
-                  e.target.value,
-                )
-              }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  confirmInsertImage();
-                }
-              }}
-              autoFocus
-              className="
-                w-full
-                rounded-md
-                border
-                border-gray-300
-                bg-white
-                px-3
-                py-2
-                text-sm
-                text-gray-900
-                focus:outline-none
-                focus:ring-2
-                focus:ring-blue-500
-                dark:border-gray-600
-                dark:bg-gray-700
-                dark:text-gray-100
-              "
-            />
-
-            <div className="mt-4 flex justify-end gap-3">
-              <button
-                onClick={() =>
-                  setShowImageDialog(false)
-                }
-                className="
-                  rounded-md
-                  px-4
-                  py-2
-                  text-sm
-                  text-gray-700
-                  hover:bg-gray-100
-                  dark:text-gray-300
-                  dark:hover:bg-gray-700
-                "
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={
-                  confirmInsertImage
-                }
-                className="
-                  rounded-md
-                  bg-blue-600
-                  px-4
-                  py-2
-                  text-sm
-                  text-white
-                  hover:bg-blue-700
-                "
-              >
-                Insert
-              </button>
-            </div>
-          </div>
-        </div>
+      {selectedImagePath && !readOnly && (
+        <ImageToolbar
+          engine={engine}
+          imagePath={selectedImagePath}
+          editorContainer={containerRef}
+          onClose={() => setSelectedImagePath(null)}
+        />
       )}
     </div>
   );
