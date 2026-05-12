@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "$i = [Console]::In.ReadToEnd() | ConvertFrom-Json; $p = $i.tool_input.file_path; if ($p -and $p -match 'src[\\\\/]') { Write-Output '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"You just edited a file under src/. Review whether CLAUDE.md (architecture overview, Key files table, data flow, plugin/pending-marks/selection sections) still accurately describes the code after this change. If the change introduces a new file, renames one, alters data flow, or changes a documented behavior, update CLAUDE.md now. If the change is purely internal (bug fix, refactor with no documented surface change), skip.\"}}' }"
+          }
+        ]
+      }
+    ]
+  }
+}

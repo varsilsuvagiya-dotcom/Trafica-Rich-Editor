@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"d:/laragon/www/traffica_rich_editor/src/editor/core\" \"d:/laragon/www/traffica_rich_editor/src/editor/commands\" \"d:/laragon/www/traffica_rich_editor/src/editor/plugins\" \"d:/laragon/www/traffica_rich_editor/src/editor/nodes\" \"d:/laragon/www/traffica_rich_editor/src/editor/marks\" \"d:/laragon/www/traffica_rich_editor/src/editor/selection\" \"d:/laragon/www/traffica_rich_editor/src/editor/history\" \"d:/laragon/www/traffica_rich_editor/src/editor/serialization\" \"d:/laragon/www/traffica_rich_editor/src/editor/rendering\" \"d:/laragon/www/traffica_rich_editor/src/editor/utils\" \"d:/laragon/www/traffica_rich_editor/src/components/toolbar\" \"d:/laragon/www/traffica_rich_editor/src/hooks\" \"d:/laragon/www/traffica_rich_editor/src/types\")",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(python -c \"import sys,json; lines=[l.strip\\(\\) for l in sys.stdin if l.strip\\(\\)]; [print\\(json.loads\\(l\\).get\\('message',''\\)[:120]\\) for l in lines[-5:]]\")",
+      "Bash(curl -sS -o NUL -w \"HTTP %{http_code}\\\\n\" http://localhost:3001/)",
+      "Bash(curl -sS http://localhost:3001/)",
+      "Bash(npx tsx *)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "PowerShell('{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"d:/laragon/www/traffica_rich_editor/src/foo.ts\"}}' | powershell -NoProfile -ExecutionPolicy Bypass -File .claude\\\\test-hook.ps1)",
+      "PowerShell('{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"d:/laragon/www/traffica_rich_editor/app/page.tsx\"}}' | powershell -NoProfile -ExecutionPolicy Bypass -File .claude\\\\test-hook.ps1; Write-Output \"exit=$LASTEXITCODE\")",
+      "Bash(npx next *)"
+    ],
+    "additionalDirectories": [
+      "d:\\laragon\\www\\traffica_rich_editor\\src\\editor"
+    ]
+  }
+}
