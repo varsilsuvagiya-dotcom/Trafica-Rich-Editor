@@ -32,11 +32,11 @@ export function ToolbarButton({
         if (!isDisabled) onClick();
       }}
       className={[
-        'flex items-center justify-center w-8 h-8 rounded text-sm font-medium transition-colors',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+        'flex items-center justify-center w-7 h-7 rounded text-sm transition-colors',
+        'focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
         isActive
-          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700',
+          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
+          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
         isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
       ].join(' ')}
     >

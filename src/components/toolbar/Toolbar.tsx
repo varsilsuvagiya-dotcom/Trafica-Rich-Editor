@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { ToolbarButton } from './ToolbarButton';
-import type { EditorEngine } from '../../editor/core/EditorEngine';
-import { useEditorState } from '../../hooks/useEditorState';
+import React, { useState, useRef, useEffect } from "react";
+import { ToolbarButton } from "./ToolbarButton";
+import type { EditorEngine } from "../../editor/core/EditorEngine";
+import { useEditorState } from "../../hooks/useEditorState";
 import {
   toggleBold,
   toggleItalic,
@@ -15,40 +15,61 @@ import {
   setHeading,
   setParagraph,
   setBlockquote,
-  setCodeBlock,
   insertLink,
   removeLink,
-} from '../../editor/commands';
-import { getActiveMarks, getActiveBlockType, getActiveLinkHref, getActiveAlignment, getActiveFontSize, getActiveFontFamily, getActiveHighlightColor, getActiveTextColor } from '../../editor/selection/SelectionEngine';
-import { getDocumentMarkAttrValues } from '../../editor/core/DocumentModel';
-import { AlignmentDropdown } from './AlignmentDropdown';
-import { FontSizeDropdown } from './FontSizeDropdown';
-import { FontFamilyDropdown } from './FontFamilyDropdown';
-import { BackgroundColorDropdown } from './BackgroundColorDropdown';
-import { TextColorDropdown } from './TextColorDropdown';
-import { HorizontalRuleButton } from './HorizontalRuleButton';
-import { ChecklistButton } from './ChecklistButton';
-import { TableButton } from './TableButton';
-import { ImageUploadButton } from './ImageUploadButton';
-import { undo, redo } from '../../editor/history/HistoryManager';
+} from "../../editor/commands";
+import {
+  getActiveMarks,
+  getActiveBlockType,
+  getActiveLinkHref,
+  getActiveAlignment,
+  getActiveFontSize,
+  getActiveFontFamily,
+  getActiveHighlightColor,
+  getActiveTextColor,
+} from "../../editor/selection/SelectionEngine";
+import { getDocumentMarkAttrValues } from "../../editor/core/DocumentModel";
+import { AlignmentDropdown } from "./AlignmentDropdown";
+import { FontSizeDropdown } from "./FontSizeDropdown";
+import { FontFamilyDropdown } from "./FontFamilyDropdown";
+import { BackgroundColorDropdown } from "./BackgroundColorDropdown";
+import { TextColorDropdown } from "./TextColorDropdown";
+import { HorizontalRuleButton } from "./HorizontalRuleButton";
+import { ChecklistButton } from "./ChecklistButton";
+import { TableButton } from "./TableButton";
+import { ImageUploadButton } from "./ImageUploadButton";
+import { SpecialCharactersButton } from "./SpecialCharactersButton";
+import { CodeBlockButton } from "./CodeBlockButton";
+import { SourceEditingButton } from "./SourceEditingButton";
+import { undo, redo } from "../../editor/history/HistoryManager";
 
 interface ToolbarProps {
   engine: EditorEngine;
-  onFindReplace?: (mode: 'find' | 'replace') => void;
+  onFindReplace?: (mode: "find" | "replace") => void;
   /** When true, the link popup opens immediately (driven by Ctrl+K from Editor) */
   linkPopupOpen?: boolean;
   onLinkPopupClose?: () => void;
+  isSourceMode?: boolean;
+  onToggleSource?: () => void;
 }
 
-export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose }: ToolbarProps) {
+export function Toolbar({
+  engine,
+  onFindReplace,
+  linkPopupOpen,
+  onLinkPopupClose,
+  isSourceMode = false,
+  onToggleSource,
+}: ToolbarProps) {
   const state = useEditorState(engine);
   const { doc, selection, marks } = state;
 
   // For collapsed cursors use pending marks (what next typed char will have).
   // For expanded selections use the marks on the selected text nodes.
-  const activeMarks = (selection && !selection.isCollapsed)
-    ? getActiveMarks(doc, selection)
-    : new Set(marks.map((m) => m.type));
+  const activeMarks =
+    selection && !selection.isCollapsed
+      ? getActiveMarks(doc, selection)
+      : new Set(marks.map((m) => m.type));
   const activeBlock = getActiveBlockType(doc, selection);
   const activeLinkHref = getActiveLinkHref(doc, selection, marks);
   const activeAlignment = getActiveAlignment(doc, selection);
@@ -56,8 +77,16 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
   const activeFontFamily = getActiveFontFamily(doc, selection, marks);
   const activeHighlightColor = getActiveHighlightColor(doc, selection, marks);
   const activeTextColor = getActiveTextColor(doc, selection, marks);
-  const documentTextColors = getDocumentMarkAttrValues(doc, 'text_color', 'color');
-  const documentHighlightColors = getDocumentMarkAttrValues(doc, 'highlight', 'color');
+  const documentTextColors = getDocumentMarkAttrValues(
+    doc,
+    "text_color",
+    "color",
+  );
+  const documentHighlightColors = getDocumentMarkAttrValues(
+    doc,
+    "highlight",
+    "color",
+  );
 
   const run = (command: (e: typeof engine) => boolean) => command(engine);
 
@@ -65,24 +94,10 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
     <div
       role="toolbar"
       aria-label="Editor formatting toolbar"
-      className="flex flex-wrap items-center gap-0.5 px-2 py-1.5 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 select-none"
+      className="flex flex-wrap items-center gap-px px-1.5 py-1 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 select-none"
     >
-      {/* Undo / Redo */}
-      <ToolbarButton
-        label="↩"
-        title="Undo (Ctrl+Z)"
-        onClick={() => undo(engine)}
-        icon={<UndoIcon />}
-      />
-      <ToolbarButton
-        label="↪"
-        title="Redo (Ctrl+Y)"
-        onClick={() => redo(engine)}
-        icon={<RedoIcon />}
-      />
-
-      <Divider />
-
+      {/* All controls except source button — disabled in source mode */}
+      <div className={`flex flex-wrap items-center gap-px ${isSourceMode ? 'pointer-events-none grayscale opacity-60' : ''}`}>
       {/* Headings */}
       <HeadingDropdown engine={engine} activeBlock={activeBlock} />
 
@@ -93,46 +108,50 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
         label="B"
         title="Bold (Ctrl+B)"
         onClick={() => run(toggleBold)}
-        isActive={activeMarks.has('bold')}
+        isActive={activeMarks.has("bold")}
         icon={<span className="font-bold text-sm">B</span>}
       />
       <ToolbarButton
         label="I"
         title="Italic (Ctrl+I)"
         onClick={() => run(toggleItalic)}
-        isActive={activeMarks.has('italic')}
+        isActive={activeMarks.has("italic")}
         icon={<span className="italic text-sm">I</span>}
       />
       <ToolbarButton
         label="U"
         title="Underline (Ctrl+U)"
         onClick={() => run(toggleUnderline)}
-        isActive={activeMarks.has('underline')}
+        isActive={activeMarks.has("underline")}
         icon={<span className="underline text-sm">U</span>}
       />
       <ToolbarButton
         label="S"
         title="Strikethrough"
         onClick={() => run(toggleStrikethrough)}
-        isActive={activeMarks.has('strikethrough')}
+        isActive={activeMarks.has("strikethrough")}
         icon={<span className="line-through text-sm">S</span>}
       />
       <ToolbarButton
         label="`"
         title="Inline Code"
         onClick={() => run(toggleCode)}
-        isActive={activeMarks.has('code')}
+        isActive={activeMarks.has("code")}
         icon={<CodeIcon />}
       />
       <LinkButton
         engine={engine}
-        isActive={activeMarks.has('link')}
+        isActive={activeMarks.has("link")}
         activeHref={activeLinkHref}
         hasTextSelected={!!(selection && !selection.isCollapsed)}
         externalOpen={linkPopupOpen}
         onExternalClose={onLinkPopupClose}
       />
-      <BackgroundColorDropdown engine={engine} activeColor={activeHighlightColor} documentColors={documentHighlightColors} />
+      <BackgroundColorDropdown
+        engine={engine}
+        activeColor={activeHighlightColor}
+        documentColors={documentHighlightColors}
+      />
       <TextColorDropdown
         engine={engine}
         activeColor={activeTextColor}
@@ -161,14 +180,14 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
         label="UL"
         title="Bullet List"
         onClick={() => run(toggleBulletList)}
-        isActive={activeBlock === 'bullet_list'}
+        isActive={activeBlock === "bullet_list"}
         icon={<BulletListIcon />}
       />
       <ToolbarButton
         label="OL"
         title="Ordered List"
         onClick={() => run(toggleOrderedList)}
-        isActive={activeBlock === 'ordered_list'}
+        isActive={activeBlock === "ordered_list"}
         icon={<OrderedListIcon />}
       />
       <ChecklistButton engine={engine} />
@@ -180,16 +199,10 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
         label="❝"
         title="Blockquote"
         onClick={() => run(setBlockquote)}
-        isActive={activeBlock === 'blockquote'}
+        isActive={activeBlock === "blockquote"}
         icon={<BlockquoteIcon />}
       />
-      <ToolbarButton
-        label="</>"
-        title="Code Block"
-        onClick={() => run(setCodeBlock)}
-        isActive={activeBlock === 'code_block'}
-        icon={<CodeBlockIcon />}
-      />
+      <CodeBlockButton engine={engine} />
 
       <HorizontalRuleButton engine={engine} />
       <TableButton engine={engine} />
@@ -198,6 +211,7 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
 
       {/* Image */}
       <ImageUploadButton engine={engine} />
+      <SpecialCharactersButton engine={engine} />
 
       {onFindReplace && (
         <>
@@ -205,11 +219,38 @@ export function Toolbar({ engine, onFindReplace, linkPopupOpen, onLinkPopupClose
           <ToolbarButton
             label="Find"
             title="Find and Replace (Ctrl+F)"
-            onClick={() => onFindReplace('find')}
+            onClick={() => onFindReplace("find")}
             icon={<FindReplaceIcon />}
           />
         </>
       )}
+
+      <Divider />
+
+      {/* Undo / Redo */}
+      <ToolbarButton
+        label="↩"
+        title="Undo (Ctrl+Z)"
+        onClick={() => undo(engine)}
+        icon={<UndoIcon />}
+      />
+      <ToolbarButton
+        label="↪"
+        title="Redo (Ctrl+Y)"
+        onClick={() => redo(engine)}
+        icon={<RedoIcon />}
+      />
+
+      </div>{/* end disabled-in-source-mode wrapper */}
+
+      {onToggleSource && (
+        <>
+          <Divider />
+          <SourceEditingButton isActive={isSourceMode} onToggle={onToggleSource} />
+        </>
+      )}
+
+      <Divider />
     </div>
   );
 }
@@ -226,17 +267,17 @@ function HeadingDropdown({
   const run = (command: (e: typeof engine) => boolean) => command(engine);
 
   const BLOCK_LABELS: Record<string, string> = {
-    paragraph: 'Paragraph',
-    'heading-1': 'Heading 1',
-    'heading-2': 'Heading 2',
-    'heading-3': 'Heading 3',
-    'heading-4': 'Heading 4',
-    'heading-5': 'Heading 5',
-    'heading-6': 'Heading 6',
-    blockquote: 'Quote',
-    code_block: 'Code',
+    paragraph: "Paragraph",
+    "heading-1": "Heading 1",
+    "heading-2": "Heading 2",
+    "heading-3": "Heading 3",
+    "heading-4": "Heading 4",
+    "heading-5": "Heading 5",
+    "heading-6": "Heading 6",
+    blockquote: "Quote",
+    code_block: "Code",
   };
-  const label = BLOCK_LABELS[activeBlock] ?? 'Paragraph';
+  const label = BLOCK_LABELS[activeBlock] ?? "Paragraph";
 
   return (
     <div className="relative group">
@@ -251,13 +292,41 @@ function HeadingDropdown({
 
       <div className="absolute top-full left-0 mt-0.5 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded shadow-lg z-50 hidden group-focus-within:block group-hover:block">
         {[
-          { label: 'Paragraph',  cmd: setParagraph,  active: activeBlock === 'paragraph' },
-          { label: 'Heading 1',  cmd: setHeading(1), active: activeBlock === 'heading-1' },
-          { label: 'Heading 2',  cmd: setHeading(2), active: activeBlock === 'heading-2' },
-          { label: 'Heading 3',  cmd: setHeading(3), active: activeBlock === 'heading-3' },
-          { label: 'Heading 4',  cmd: setHeading(4), active: activeBlock === 'heading-4' },
-          { label: 'Heading 5',  cmd: setHeading(5), active: activeBlock === 'heading-5' },
-          { label: 'Heading 6',  cmd: setHeading(6), active: activeBlock === 'heading-6' },
+          {
+            label: "Paragraph",
+            cmd: setParagraph,
+            active: activeBlock === "paragraph",
+          },
+          {
+            label: "Heading 1",
+            cmd: setHeading(1),
+            active: activeBlock === "heading-1",
+          },
+          {
+            label: "Heading 2",
+            cmd: setHeading(2),
+            active: activeBlock === "heading-2",
+          },
+          {
+            label: "Heading 3",
+            cmd: setHeading(3),
+            active: activeBlock === "heading-3",
+          },
+          {
+            label: "Heading 4",
+            cmd: setHeading(4),
+            active: activeBlock === "heading-4",
+          },
+          {
+            label: "Heading 5",
+            cmd: setHeading(5),
+            active: activeBlock === "heading-5",
+          },
+          {
+            label: "Heading 6",
+            cmd: setHeading(6),
+            active: activeBlock === "heading-6",
+          },
         ].map(({ label, cmd, active }) => (
           <button
             key={label}
@@ -267,9 +336,11 @@ function HeadingDropdown({
               run(cmd);
             }}
             className={[
-              'w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700',
-              active ? 'font-semibold text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300',
-            ].join(' ')}
+              "w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700",
+              active
+                ? "font-semibold text-blue-600 dark:text-blue-400"
+                : "text-gray-700 dark:text-gray-300",
+            ].join(" ")}
           >
             {label}
           </button>
@@ -299,21 +370,21 @@ function LinkButton({
 }) {
   const [open, setOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [url, setUrl] = useState('');
-  const [displayText, setDisplayText] = useState('');
+  const [url, setUrl] = useState("");
+  const [displayText, setDisplayText] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
 
   const openPopup = () => {
     if (isActive) {
-      setUrl(activeHref ?? '');
-      setDisplayText('');
-      setEditMode(true);      // editing existing link → straight to edit
+      setUrl(activeHref ?? "");
+      setDisplayText("");
+      setEditMode(true); // editing existing link → straight to edit
     } else {
-      setUrl('');
-      setDisplayText('');
-      setEditMode(true);      // inserting new link → edit mode
+      setUrl("");
+      setDisplayText("");
+      setEditMode(true); // inserting new link → edit mode
     }
     setOpen(true);
   };
@@ -321,8 +392,8 @@ function LinkButton({
   const closePopup = () => {
     setOpen(false);
     setEditMode(false);
-    setUrl('');
-    setDisplayText('');
+    setUrl("");
+    setDisplayText("");
     onExternalClose?.();
   };
 
@@ -330,26 +401,29 @@ function LinkButton({
   useEffect(() => {
     if (!externalOpen) return;
     const t = setTimeout(() => {
-      setUrl(isActive ? (activeHref ?? '') : '');
-      setDisplayText('');
+      setUrl(isActive ? (activeHref ?? "") : "");
+      setDisplayText("");
       setEditMode(true);
       setOpen(true);
     }, 0);
     return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalOpen]);
 
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         closePopup();
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Auto-focus URL field whenever edit mode opens
@@ -361,7 +435,10 @@ function LinkButton({
   }, [open, editMode]);
 
   const handleToolbarClick = () => {
-    if (open) { closePopup(); return; }
+    if (open) {
+      closePopup();
+      return;
+    }
     openPopup();
   };
 
@@ -381,8 +458,8 @@ function LinkButton({
   };
 
   const handleStartEdit = () => {
-    setUrl(activeHref ?? '');
-    setDisplayText('');
+    setUrl(activeHref ?? "");
+    setDisplayText("");
     setEditMode(true);
   };
 
@@ -414,17 +491,20 @@ function LinkButton({
               </p>
               <div className="flex items-center gap-2 min-w-0">
                 <a
-                  href={activeHref ?? '#'}
+                  href={activeHref ?? "#"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 text-sm text-blue-600 dark:text-blue-400 hover:underline truncate"
-                  title={activeHref ?? ''}
+                  title={activeHref ?? ""}
                 >
                   {activeHref}
                 </a>
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); handleStartEdit(); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleStartEdit();
+                  }}
                   className="shrink-0 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
                   aria-label="Edit link"
                 >
@@ -432,7 +512,10 @@ function LinkButton({
                 </button>
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); handleRemove(); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleRemove();
+                  }}
                   className="shrink-0 text-xs text-red-500 dark:text-red-400 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                   aria-label="Remove link"
                 >
@@ -444,7 +527,7 @@ function LinkButton({
             /* ── Edit / Insert mode ── */
             <>
               <p className="text-xs font-medium text-gray-400 dark:text-gray-500 mb-3 uppercase tracking-wide">
-                {isActive ? 'Edit link' : 'Insert link'}
+                {isActive ? "Edit link" : "Insert link"}
               </p>
 
               {/* Display text — only shown when inserting at collapsed cursor */}
@@ -459,8 +542,11 @@ function LinkButton({
                     value={displayText}
                     onChange={(e) => setDisplayText(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); urlInputRef.current?.focus(); }
-                      if (e.key === 'Escape') closePopup();
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        urlInputRef.current?.focus();
+                      }
+                      if (e.key === "Escape") closePopup();
                     }}
                     placeholder="Link text"
                     className="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -479,8 +565,11 @@ function LinkButton({
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); handleApply(); }
-                    if (e.key === 'Escape') closePopup();
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApply();
+                    }
+                    if (e.key === "Escape") closePopup();
                   }}
                   placeholder="https://example.com"
                   className="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -491,16 +580,28 @@ function LinkButton({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); handleApply(); }}
-                  disabled={!url.trim() || (showTextInput && !displayText.trim() && !hasTextSelected && !isActive)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleApply();
+                  }}
+                  disabled={
+                    !url.trim() ||
+                    (showTextInput &&
+                      !displayText.trim() &&
+                      !hasTextSelected &&
+                      !isActive)
+                  }
                   className="flex-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {isActive ? 'Update' : 'Insert'}
+                  {isActive ? "Update" : "Insert"}
                 </button>
                 {isActive && (
                   <button
                     type="button"
-                    onMouseDown={(e) => { e.preventDefault(); handleRemove(); }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleRemove();
+                    }}
                     className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                   >
                     Remove
@@ -508,7 +609,10 @@ function LinkButton({
                 )}
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); closePopup(); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    closePopup();
+                  }}
                   className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                   aria-label="Cancel"
                 >
@@ -526,7 +630,12 @@ function LinkButton({
 // ─── Separator ────────────────────────────────────────────────────────────────
 
 function Divider() {
-  return <div className="w-px h-6 bg-gray-200 dark:bg-gray-600 mx-1" aria-hidden="true" />;
+  return (
+    <div
+      className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-0.5"
+      aria-hidden="true"
+    />
+  );
 }
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
@@ -567,16 +676,36 @@ function RedoIcon() {
 
 function CodeIcon() {
   return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <polyline points="16 18 22 12 16 6" strokeLinecap="round" strokeLinejoin="round" />
-      <polyline points="8 6 2 12 8 18" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      className="w-4 h-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <polyline
+        points="16 18 22 12 16 6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points="8 6 2 12 8 18"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 function BulletListIcon() {
   return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <svg
+      className="w-4 h-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
       <line x1="9" y1="6" x2="20" y2="6" strokeLinecap="round" />
       <line x1="9" y1="12" x2="20" y2="12" strokeLinecap="round" />
       <line x1="9" y1="18" x2="20" y2="18" strokeLinecap="round" />
@@ -589,13 +718,46 @@ function BulletListIcon() {
 
 function OrderedListIcon() {
   return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <svg
+      className="w-4 h-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
       <line x1="10" y1="6" x2="21" y2="6" strokeLinecap="round" />
       <line x1="10" y1="12" x2="21" y2="12" strokeLinecap="round" />
       <line x1="10" y1="18" x2="21" y2="18" strokeLinecap="round" />
-      <text x="2" y="7" fontSize="7" fill="currentColor" stroke="none" fontWeight="bold">1</text>
-      <text x="2" y="13" fontSize="7" fill="currentColor" stroke="none" fontWeight="bold">2</text>
-      <text x="2" y="19" fontSize="7" fill="currentColor" stroke="none" fontWeight="bold">3</text>
+      <text
+        x="2"
+        y="7"
+        fontSize="7"
+        fill="currentColor"
+        stroke="none"
+        fontWeight="bold"
+      >
+        1
+      </text>
+      <text
+        x="2"
+        y="13"
+        fontSize="7"
+        fill="currentColor"
+        stroke="none"
+        fontWeight="bold"
+      >
+        2
+      </text>
+      <text
+        x="2"
+        y="19"
+        fontSize="7"
+        fill="currentColor"
+        stroke="none"
+        fontWeight="bold"
+      >
+        3
+      </text>
     </svg>
   );
 }
@@ -609,29 +771,41 @@ function BlockquoteIcon() {
   );
 }
 
-function CodeBlockIcon() {
-  return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="M9 9l-3 3 3 3" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15 9l3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 
 function LinkIcon() {
   return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      className="w-4 h-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 function FindReplaceIcon() {
   return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className="w-4 h-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <circle cx="10" cy="10" r="6" />
       <line x1="14.5" y1="14.5" x2="20" y2="20" />
       <path d="M7 10h6" />

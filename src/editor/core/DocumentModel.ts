@@ -21,7 +21,6 @@ import type {
   NodePosition,
   BlockNodeType,
   NodeAttrs,
-  EditorSelection,
 } from '../../types';
 
 // ─── Predicates ──────────────────────────────────────────────────────────────
@@ -940,6 +939,58 @@ export function getDocumentLength(doc: Document): number {
     }
   });
   return len;
+}
+
+/**
+ * Return the absolute character offset of `nodePos` within its immediate parent block.
+ * Used to map positions through text-node splits caused by mark operations.
+ */
+export function getCharOffsetInBlock(
+  doc: Document,
+  blockPath: number[],
+  nodePos: NodePosition,
+): number {
+  const block = getNodeAtPath(doc, blockPath);
+  if (!block || !('children' in block)) return nodePos.offset;
+  const children = (block as BlockNode).children;
+  const targetIdx = nodePos.path[blockPath.length] ?? 0;
+  let offset = 0;
+  for (let i = 0; i < targetIdx && i < children.length; i++) {
+    const child = children[i];
+    if (isTextNode(child as EditorNode)) offset += (child as TextNode).text.length;
+  }
+  return offset + nodePos.offset;
+}
+
+/**
+ * Inverse of getCharOffsetInBlock — find the (path, offset) in `newDoc` that
+ * corresponds to a given character offset within a block. Handles the case
+ * where text nodes were split/merged since the char offset was captured.
+ */
+export function getPosFromCharOffset(
+  newDoc: Document,
+  blockPath: number[],
+  charOffset: number,
+): NodePosition {
+  const block = getNodeAtPath(newDoc, blockPath);
+  if (!block || !('children' in block)) return { path: [...blockPath, 0], offset: charOffset };
+  const children = (block as BlockNode).children;
+  let remaining = charOffset;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (!isTextNode(child as EditorNode)) continue;
+    const len = (child as TextNode).text.length;
+    if (remaining <= len) return { path: [...blockPath, i], offset: remaining };
+    remaining -= len;
+  }
+  // Clamp to end of last text node
+  for (let i = children.length - 1; i >= 0; i--) {
+    const child = children[i];
+    if (isTextNode(child as EditorNode)) {
+      return { path: [...blockPath, i], offset: (child as TextNode).text.length };
+    }
+  }
+  return { path: [...blockPath, 0], offset: 0 };
 }
 
 /**

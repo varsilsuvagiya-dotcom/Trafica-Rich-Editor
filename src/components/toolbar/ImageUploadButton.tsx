@@ -24,13 +24,18 @@ export function ImageUploadButton({ engine, onUploadImage }: ImageUploadButtonPr
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const altInputRef  = useRef('');
+
+  // Keep ref in sync so async handleFile always reads latest alt text
+  useEffect(() => { altInputRef.current = altInput; }, [altInput]);
 
   const close = useCallback(() => {
     setOpen(false);
     setUrlInput('');
     setUrlError(false);
     setAltInput('');
-    setPreview(null);
+    altInputRef.current = '';
+    setPreview((prev) => { if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev); return null; });
     setUploading(false);
     setProgress(0);
     setDragging(false);
@@ -81,14 +86,14 @@ export function ImageUploadButton({ engine, onUploadImage }: ImageUploadButtonPr
       const finalUrl = await onUploadImage(file);
       clearInterval(fakeProgress);
       setProgress(100);
-      insertImage(finalUrl, altInput || file.name.replace(/\.[^.]+$/, ''))(engine);
+      insertImage(finalUrl, altInputRef.current || file.name.replace(/\.[^.]+$/, ''))(engine);
       setTimeout(close, 300);
     } catch {
       clearInterval(fakeProgress);
       setUploading(false);
       setProgress(0);
     }
-  }, [engine, onUploadImage, altInput, close]);
+  }, [engine, onUploadImage, close]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -212,7 +217,7 @@ export function ImageUploadButton({ engine, onUploadImage }: ImageUploadButtonPr
                     {!uploading && (
                       <button
                         type="button"
-                        onMouseDown={(e) => { e.preventDefault(); setPreview(null); }}
+                        onMouseDown={(e) => { e.preventDefault(); setPreview((prev) => { if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev); return null; }); }}
                         className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center text-xs hover:bg-black/70"
                       >
                         ✕

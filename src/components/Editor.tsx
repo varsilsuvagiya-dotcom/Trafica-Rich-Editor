@@ -27,6 +27,7 @@ import { attachPasteHandler } from '../editor/plugins/PastePlugin';
 import {
   createTransaction,
   tr_setSelection,
+  tr_replaceDoc,
 } from '../editor/core/Transaction';
 
 import {
@@ -35,6 +36,7 @@ import {
   insertText,
   toggleCheckItemAt,
 } from '../editor/commands';
+import { findContentBlockPath } from '../editor/core/DocumentModel';
 
 import { Toolbar } from './toolbar/Toolbar';
 import { FindReplaceModal } from './FindReplaceModal';
@@ -85,10 +87,49 @@ export function Editor({
   const [findReplaceOpen,   setFindReplaceOpen]    = useState(false);
   const [findReplaceMode,   setFindReplaceMode]    = useState<'find' | 'replace'>('find');
   const [linkPopupOpen,     setLinkPopupOpen]      = useState(false);
+  const [isSourceMode,      setIsSourceMode]       = useState(false);
+  const [sourceHTML,        setSourceHTML]         = useState('');
+  const [editorHeight,      setEditorHeight]       = useState<number | null>(null);
+  const editorRootRef = useRef<HTMLDivElement>(null);
+  const resizeDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [linkTooltip, setLinkTooltip] = useState<{
     href: string; x: number; y: number;
   } | null>(null);
   const linkTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Source editing toggle ────────────────────────────────────────────────────
+  const handleToggleSource = useCallback(() => {
+    if (!isSourceMode) {
+      // Visual → Source: serialize current doc to formatted HTML
+      const html = htmlSerializer.serialize(engine.getState().doc);
+      setSourceHTML(prettyPrintHTML(html));
+      setIsSourceMode(true);
+    } else {
+      // Source → Visual: parse HTML, dispatch replace_doc
+      const newDoc = htmlSerializer.deserialize(sourceHTML);
+      const tr = createTransaction();
+      tr.steps.push(tr_replaceDoc(newDoc));
+      engine.dispatch(tr);
+      setIsSourceMode(false);
+    }
+  }, [isSourceMode, sourceHTML, engine]);
+
+  // ── Editor resize drag ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const drag = resizeDragRef.current;
+      if (!drag) return;
+      const newHeight = Math.max(120, drag.startHeight + (e.clientY - drag.startY));
+      setEditorHeight(newHeight);
+    };
+    const onMouseUp = () => { resizeDragRef.current = null; };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   // ── Table state ─────────────────────────────────────────────────────────────
   const [tableContextMenu, setTableContextMenu] = useState<{
@@ -311,6 +352,20 @@ export function Editor({
       }
       // Any key clears image selection so typing resumes normally
       if (selectedImagePath) setSelectedImagePath(null);
+
+      // Tab inside code_block → insert 2 spaces instead of shifting focus.
+      if (e.key === 'Tab') {
+        const { doc, selection: sel } = engine.getState();
+        if (sel) {
+          const bp = findContentBlockPath(doc, sel.anchor.path);
+          const block = bp ? (getNodeAtPath(doc, bp) as BlockNode | null) : null;
+          if (block?.type === 'code_block') {
+            e.preventDefault();
+            insertText('  ')(engine);
+            return;
+          }
+        }
+      }
 
       const handled = engine.handleKeyDown(
         e.nativeEvent,
@@ -633,14 +688,13 @@ export function Editor({
         }
       }
 
-      // Checkbox toggle
-      if (
-        target.tagName === 'INPUT' &&
-        (target as HTMLInputElement).type === 'checkbox' &&
-        target.dataset.checkPath
-      ) {
+      // Checkbox toggle — target is the custom wrapper span or its SVG child
+      const checkTarget = target.dataset.checkPath
+        ? target
+        : (target.closest('[data-check-path]') as HTMLElement | null);
+      if (checkTarget?.dataset.checkPath) {
         e.preventDefault();
-        toggleCheckItemAt(JSON.parse(target.dataset.checkPath))(engine);
+        toggleCheckItemAt(JSON.parse(checkTarget.dataset.checkPath))(engine);
       }
     },
     [engine, readOnly],
@@ -754,14 +808,16 @@ export function Editor({
   /*
    * Empty state
    */
-  const isEmpty =
+  const isVisualEmpty =
     state.doc.children.length === 1 &&
     state.doc.children[0].type === 'paragraph' &&
     state.doc.children[0].children.length === 0;
 
   return (
     <div
-      className={`editor-root relative flex flex-col h-full ${className}`}
+      ref={editorRootRef}
+      className={`editor-root relative flex flex-col ${className}`}
+      style={editorHeight ? { minHeight: editorHeight } : undefined}
     >
       {!readOnly && (
         <Toolbar
@@ -772,72 +828,95 @@ export function Editor({
           }}
           linkPopupOpen={linkPopupOpen}
           onLinkPopupClose={() => setLinkPopupOpen(false)}
+          isSourceMode={isSourceMode}
+          onToggleSource={handleToggleSource}
         />
       )}
 
-      <div className="relative flex-1 overflow-auto">
-        {isEmpty && (
-          <div
-            className="
-              absolute
-              top-6
-              left-6
-              pointer-events-none
-              select-none
-              text-base
-              text-gray-400
-              dark:text-gray-500
-            "
-            aria-hidden="true"
-          >
-            {placeholder}
-          </div>
-        )}
+      <div className="relative">
+        {/* Source editing textarea */}
+        {isSourceMode ? (
+          <textarea
+            aria-label="HTML source editor"
+            value={sourceHTML}
+            onChange={(e) => {
+              setSourceHTML(e.target.value);
+              const t = e.target;
+              t.style.height = 'auto';
+              t.style.height = t.scrollHeight + 'px';
+            }}
+            ref={(el) => {
+              if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+            }}
+            spellCheck={false}
+            className="w-full block px-6 py-4 font-mono text-sm leading-relaxed bg-gray-950 text-green-300 outline-none resize-none border-0 overflow-hidden"
+          />
+        ) : (
+          <>
+            {isVisualEmpty && (
+              <div
+                className="
+                  absolute
+                  top-6
+                  left-6
+                  pointer-events-none
+                  select-none
+                  text-base
+                  text-gray-400
+                  dark:text-gray-500
+                "
+                aria-hidden="true"
+              >
+                {placeholder}
+              </div>
+            )}
 
-        <div
-          ref={containerRef}
-          contentEditable={!readOnly}
-          suppressContentEditableWarning
-          role="textbox"
-          aria-multiline="true"
-          aria-label="Rich text editor"
-          spellCheck
-          onMouseDown={handleMouseDown}
-          onContextMenu={handleContextMenu}
-          onFocus={handleFocus}
-          onClick={handleClick}
-          onKeyDown={handleKeyDown}
-          className={[
-            'editor-canvas',
-            'min-h-full',
-            'px-6',
-            'py-4',
-            'outline-none',
-            'text-base',
-            'leading-relaxed',
-            'text-gray-900',
-            'dark:text-gray-100',
-            readOnly
-              ? 'cursor-default'
-              : 'cursor-text',
-          ].join(' ')}
-        />
+            <div
+              ref={containerRef}
+              contentEditable={!readOnly}
+              suppressContentEditableWarning
+              role="textbox"
+              aria-multiline="true"
+              aria-label="Rich text editor"
+              spellCheck
+              onMouseDown={handleMouseDown}
+              onContextMenu={handleContextMenu}
+              onFocus={handleFocus}
+              onClick={handleClick}
+              onKeyDown={handleKeyDown}
+              className={[
+                'editor-canvas',
+                'min-h-[300px]',
+                'px-6',
+                'py-4',
+                'outline-none',
+                'text-base',
+                'leading-relaxed',
+                'text-gray-900',
+                'dark:text-gray-100',
+                readOnly
+                  ? 'cursor-default'
+                  : 'cursor-text',
+              ].join(' ')}
+            />
 
-        {/* Link hover tooltip */}
-        {linkTooltip && (
-          <div
-            role="tooltip"
-            style={{ left: linkTooltip.x, top: linkTooltip.y }}
-            className="absolute z-50 pointer-events-none flex items-center gap-1.5 bg-gray-900 dark:bg-gray-700 text-white text-xs px-2.5 py-1.5 rounded shadow-lg max-w-xs"
-          >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="shrink-0 opacity-70" aria-hidden="true">
-              <path d="M6.5 3.5H4A2.5 2.5 0 0 0 4 8.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-              <path d="M9.5 3.5H12A2.5 2.5 0 0 1 12 8.5h-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-              <path d="M5.5 6h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-            </svg>
-            <span className="truncate">{linkTooltip.href}</span>
-            <span className="shrink-0 opacity-50 ml-1">Ctrl+click to open</span>
-          </div>
+            {/* Link hover tooltip */}
+            {linkTooltip && (
+              <div
+                role="tooltip"
+                style={{ left: linkTooltip.x, top: linkTooltip.y }}
+                className="absolute z-50 pointer-events-none flex items-center gap-1.5 bg-gray-900 dark:bg-gray-700 text-white text-xs px-2.5 py-1.5 rounded shadow-lg max-w-xs"
+              >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="shrink-0 opacity-70" aria-hidden="true">
+                  <path d="M6.5 3.5H4A2.5 2.5 0 0 0 4 8.5h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                  <path d="M9.5 3.5H12A2.5 2.5 0 0 1 12 8.5h-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                  <path d="M5.5 6h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                </svg>
+                <span className="truncate">{linkTooltip.href}</span>
+                <span className="shrink-0 opacity-50 ml-1">Ctrl+click to open</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -882,6 +961,75 @@ export function Editor({
           onClose={() => setSelectedImagePath(null)}
         />
       )}
+
+      {/* Resize grip */}
+      {!readOnly && (
+        <div
+          title="Drag to resize"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const rootEl = editorRootRef.current;
+            if (!rootEl) return;
+            resizeDragRef.current = {
+              startY: e.clientY,
+              startHeight: rootEl.getBoundingClientRect().height,
+            };
+          }}
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-s-resize flex items-end justify-end pr-0.5 pb-0.5 select-none"
+          aria-hidden="true"
+        >
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+            <path d="M7 1L1 7M7 4L4 7M7 7L7 7" stroke="#9ca3af" strokeWidth="1.2" strokeLinecap="round"/>
+          </svg>
+        </div>
+      )}
     </div>
   );
+}
+
+// ─── HTML pretty-printer ──────────────────────────────────────────────────────
+
+const BLOCK_TAGS = 'p|h[1-6]|ul|ol|li|blockquote|pre|figure|table|thead|tbody|tr|th|td';
+const _OPEN_ONLY_RE  = new RegExp(`^<(${BLOCK_TAGS})(?:\\s[^>]*)?>$`, 'i');
+const _CLOSE_ONLY_RE = new RegExp(`^<\\/(${BLOCK_TAGS})>$`, 'i');
+
+const _HR_RE = /^<hr(\s[^>]*)?\/?>$/i;
+
+function prettyPrintHTML(html: string): string {
+  // Insert newlines at block open/close boundaries, then indent line-by-line.
+  const blockOpen  = new RegExp(`(<(?:${BLOCK_TAGS})(?:\\s[^>]*)?>)`, 'gi');
+  const blockClose = new RegExp(`(<\\/(?:${BLOCK_TAGS})>)`, 'gi');
+
+  const spread = html
+    .replace(blockOpen,  '\n$1\n')
+    .replace(blockClose, '\n$1\n')
+    .replace(/<hr(\s[^>]*)?\/?>(\s*)/gi, '\n<hr />\n');
+
+  let depth = 0;
+  const result: string[] = [];
+
+  for (const raw of spread.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (_HR_RE.test(line)) {
+      result.push('  '.repeat(depth) + line);
+      continue;
+    }
+    if (_CLOSE_ONLY_RE.test(line)) {
+      depth = Math.max(0, depth - 1);
+      result.push('  '.repeat(depth) + line);
+      continue;
+    }
+    if (_OPEN_ONLY_RE.test(line)) {
+      result.push('  '.repeat(depth) + line);
+      depth++;
+      continue;
+    }
+    // Mixed: starts with a block open tag but also has content / close tag on same line.
+    // Don't change depth — it's self-contained (e.g. <p>text</p>, <li>text</li>).
+    result.push('  '.repeat(depth) + line);
+  }
+
+  return result.join('\n');
 }

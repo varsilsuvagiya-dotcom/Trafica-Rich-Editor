@@ -52,23 +52,46 @@
   margin: 0.25em 0;
 }
 
-.editor-canvas .editor-code-block {
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.375rem;
-  padding: 0.75em 1em;
-  overflow-x: auto;
-  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.875em;
-  line-height: 1.6;
+.editor-canvas .editor-code-block-wrapper {
   margin: 0.75em 0;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: #1e1e2e;
 }
 
+.editor-canvas .editor-code-block-header {
+  display: flex;
+  align-items: center;
+  padding: 0.3em 0.85em;
+  background: #2d2d3f;
+  color: #a0aec0;
+  font-size: 0.72em;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+  border-bottom: 1px solid #3d3d52;
+}
+
+.editor-canvas .editor-code-block {
+  background: transparent;
+  padding: 0.85em 1em;
+  overflow: hidden;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.875em;
+  line-height: 1.7;
+  margin: 0;
+  color: #cdd6f4;
+  white-space: pre;
+}
 
 .editor-canvas .editor-code-block code {
   background: none;
   padding: 0;
   font-size: inherit;
+  color: inherit;
+  white-space: pre;
 }
 
 .editor-canvas .editor-hr {
@@ -85,6 +108,11 @@
 .editor-canvas .editor-align-justify { text-align: justify; }
 
 /* ─── Inline Elements ─────────────────────────────────────────────────────── */
+
+/* Browser UA sets color:black on <mark>; override so text_color mark shows through */
+.editor-canvas mark {
+  color: inherit;
+}
 
 .editor-canvas .editor-inline-code {
   background: #f3f4f6;
@@ -203,35 +231,66 @@
 
 .editor-canvas .editor-check-list {
   list-style: none;
-  padding-left: 0.25em;
+  padding-left: 0;
   margin: 0.5em 0;
 }
 
 .editor-canvas .editor-check-list-item {
   display: flex;
-  align-items: flex-start;
-  gap: 0.5em;
-  margin: 0.25em 0;
+  align-items: baseline;
+  gap: 0.55em;
+  margin: 0.15em 0;
   min-height: 1.5em;
 }
 
-.editor-canvas .editor-checkbox {
+/* ── Custom CKEditor-style checkbox ── */
+.editor-canvas .editor-checkbox-wrapper {
   flex-shrink: 0;
-  margin-top: 0.2em;
-  width: 1em;
-  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  border: 1.5px solid #b0b8c1;
+  border-radius: 3px;
+  background: #fff;
   cursor: pointer;
-  accent-color: #2563eb;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+  top: 0.15em;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.editor-canvas .editor-checkbox-wrapper:hover {
+  border-color: #2563eb;
+}
+
+.editor-canvas .editor-checkbox-wrapper--checked {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.editor-canvas .editor-checkbox-wrapper--checked:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.editor-canvas .editor-checkbox-checkmark {
+  width: 0.7em;
+  height: 0.7em;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.editor-canvas .editor-checkbox-wrapper--checked .editor-checkbox-checkmark {
+  opacity: 1;
 }
 
 .editor-canvas .editor-check-list-content {
   flex: 1;
   min-width: 0;
-}
-
-.editor-canvas .editor-check-list-item--checked .editor-check-list-content {
-  text-decoration: line-through;
-  color: #9ca3af;
 }
 
 /* ─── Focus styles ────────────────────────────────────────────────────────── */

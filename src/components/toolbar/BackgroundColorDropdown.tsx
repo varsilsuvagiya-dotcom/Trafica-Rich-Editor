@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import type { EditorEngine } from '../../editor/core/EditorEngine';
-import { setHighlightColor } from '../../editor/commands';
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { EditorEngine } from "../../editor/core/EditorEngine";
+import { setHighlightColor } from "../../editor/commands";
 
 // ─── CKEditor 5-matching colour palette ───────────────────────────────────────
 // Same hue/saturation grid CKEditor ships by default:
@@ -18,23 +18,23 @@ interface ColorOption {
 
 const PRESET_COLORS: ColorOption[] = [
   // Row 1 — neutrals
-  { label: 'Black',       value: '#000000' },
-  { label: 'Dim grey',    value: '#4d4d4d' },
-  { label: 'Grey',        value: '#999999' },
-  { label: 'Light grey',  value: '#e6e6e6' },
-  { label: 'White',       value: '#ffffff', hasBorder: true },
+  { label: "Black", value: "#000000" },
+  { label: "Dim grey", value: "#4d4d4d" },
+  { label: "Grey", value: "#999999" },
+  { label: "Light grey", value: "#e6e6e6" },
+  { label: "White", value: "#ffffff", hasBorder: true },
   // Row 2 — warm
-  { label: 'Red',         value: '#e64d4d' },
-  { label: 'Orange',      value: '#f99a4d' },
-  { label: 'Yellow',      value: '#f9e04d' },
-  { label: 'Light green', value: '#91e44d' },
-  { label: 'Green',       value: '#54d454' },
+  { label: "Red", value: "#e64d4d" },
+  { label: "Orange", value: "#f99a4d" },
+  { label: "Yellow", value: "#f9e04d" },
+  { label: "Light green", value: "#91e44d" },
+  { label: "Green", value: "#54d454" },
   // Row 3 — cool
-  { label: 'Aquamarine',  value: '#54d4a6' },
-  { label: 'Turquoise',   value: '#54d4d4' },
-  { label: 'Light blue',  value: '#4d91e4' },
-  { label: 'Blue',        value: '#4d4de4' },
-  { label: 'Purple',      value: '#9d4de4' },
+  { label: "Aquamarine", value: "#54d4a6" },
+  { label: "Turquoise", value: "#54d4d4" },
+  { label: "Light blue", value: "#4d91e4" },
+  { label: "Blue", value: "#4d4de4" },
+  { label: "Purple", value: "#9d4de4" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -50,36 +50,44 @@ export function BackgroundColorDropdown({
   activeColor,
   documentColors,
 }: BackgroundColorDropdownProps) {
-  const [open, setOpen]           = useState(false);
+  const [open, setOpen] = useState(false);
   const [lastColor, setLastColor] = useState(PRESET_COLORS[6].value); // Yellow default
-  const [hexInput, setHexInput]   = useState('');
-  const [hexError, setHexError]   = useState(false);
-  const containerRef              = useRef<HTMLDivElement>(null);
+  const [hexInput, setHexInput] = useState("");
+  const [hexError, setHexError] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Outside-click → close
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node))
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      )
         setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
   // Escape → close
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
   }, [open]);
 
-  const applyColor = useCallback((color: string | null) => {
-    if (color) setLastColor(normalizeHex(color));
-    setHighlightColor(color)(engine);
-    setOpen(false);
-  }, [engine]);
+  const applyColor = useCallback(
+    (color: string | null) => {
+      if (color) setLastColor(normalizeHex(color));
+      setHighlightColor(color)(engine);
+      setOpen(false);
+    },
+    [engine],
+  );
 
   const handleQuickApply = () => {
     const norm = normalizeHex(lastColor);
@@ -91,7 +99,7 @@ export function BackgroundColorDropdown({
   };
 
   const commitHexInput = () => {
-    const raw = hexInput.trim().replace(/^#/, '');
+    const raw = hexInput.trim().replace(/^#/, "");
     if (/^[0-9a-f]{6}$/i.test(raw) || /^[0-9a-f]{3}$/i.test(raw)) {
       applyColor(`#${raw.toLowerCase()}`);
       setHexError(false);
@@ -102,19 +110,22 @@ export function BackgroundColorDropdown({
 
   // Non-preset document colors
   const extraDocColors = documentColors.filter(
-    (c) => !PRESET_COLORS.some((p) => normalizeHex(p.value) === normalizeHex(c)),
+    (c) =>
+      !PRESET_COLORS.some((p) => normalizeHex(p.value) === normalizeHex(c)),
   );
 
   const normActive = activeColor ? normalizeHex(activeColor) : null;
 
   return (
     <div ref={containerRef} className="relative flex items-center">
-
       {/* ── Quick-apply split button ──────────────────────────────────────── */}
       <button
         type="button"
         title={`Background color: ${lastColor}`}
-        onMouseDown={(e) => { e.preventDefault(); handleQuickApply(); }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          handleQuickApply();
+        }}
         className="flex flex-col items-center justify-center gap-0.5 w-8 h-8 rounded-l
                    text-gray-700 dark:text-gray-300
                    hover:bg-gray-100 dark:hover:bg-gray-700
@@ -131,15 +142,24 @@ export function BackgroundColorDropdown({
         title="More background colors"
         aria-haspopup="listbox"
         aria-expanded={open}
-        onMouseDown={(e) => { e.preventDefault(); setOpen((p) => { if (!p) { setHexInput(''); setHexError(false); } return !p; }); }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setOpen((p) => {
+            if (!p) {
+              setHexInput("");
+              setHexError(false);
+            }
+            return !p;
+          });
+        }}
         className={[
-          'flex items-center justify-center w-4 h-8 rounded-r border-l border-gray-200 dark:border-gray-600',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-          'transition-colors',
+          "flex items-center justify-center w-4 h-8 rounded-r border-l border-gray-200 dark:border-gray-600",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
+          "transition-colors",
           open
-            ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'
-            : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700',
-        ].join(' ')}
+            ? "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+            : "text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700",
+        ].join(" ")}
       >
         <ChevronDownIcon />
       </button>
@@ -158,7 +178,10 @@ export function BackgroundColorDropdown({
           {/* Remove background */}
           <button
             type="button"
-            onMouseDown={(e) => { e.preventDefault(); applyColor(null); }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              applyColor(null);
+            }}
             className="flex items-center gap-2 w-full px-2 py-1.5 mb-2.5 text-xs font-medium
                        text-gray-600 dark:text-gray-300
                        rounded hover:bg-gray-100 dark:hover:bg-gray-700
@@ -214,34 +237,42 @@ export function BackgroundColorDropdown({
               className="shrink-0 w-7 h-7 rounded border border-gray-300 dark:border-gray-600"
               style={{ backgroundColor: hexInputToPreview(hexInput) }}
             />
-            <div className="flex flex-1 items-center border rounded overflow-hidden
+            <div
+              className="flex flex-1 items-center border rounded overflow-hidden
                             border-gray-300 dark:border-gray-600
-                            focus-within:ring-2 focus-within:ring-blue-500">
+                            focus-within:ring-2 focus-within:ring-blue-500"
+            >
               <span className="pl-2 text-xs text-gray-400 select-none">#</span>
               <input
                 type="text"
                 maxLength={6}
                 value={hexInput}
                 onChange={(e) => {
-                  setHexInput(e.target.value.replace(/[^0-9a-fA-F]/g, ''));
+                  setHexInput(e.target.value.replace(/[^0-9a-fA-F]/g, ""));
                   setHexError(false);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); commitHexInput(); }
-                  if (e.key === 'Escape') setOpen(false);
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitHexInput();
+                  }
+                  if (e.key === "Escape") setOpen(false);
                 }}
                 placeholder="e.g. ffff00"
                 className={[
-                  'flex-1 px-1 py-1.5 text-xs bg-transparent outline-none font-mono',
-                  'text-gray-900 dark:text-gray-100',
-                  hexError ? 'text-red-500' : '',
-                ].join(' ')}
+                  "flex-1 px-1 py-1.5 text-xs bg-transparent outline-none font-mono",
+                  "text-gray-900 dark:text-gray-100",
+                  hexError ? "text-red-500" : "",
+                ].join(" ")}
                 aria-label="Hex colour value"
               />
             </div>
             <button
               type="button"
-              onMouseDown={(e) => { e.preventDefault(); commitHexInput(); }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                commitHexInput();
+              }}
               className="shrink-0 px-2 py-1.5 text-xs bg-blue-600 text-white rounded
                          hover:bg-blue-700 transition-colors"
             >
@@ -249,7 +280,9 @@ export function BackgroundColorDropdown({
             </button>
           </div>
           {hexError && (
-            <p className="text-[10px] text-red-500 mt-1 px-0.5">Invalid hex colour</p>
+            <p className="text-[10px] text-red-500 mt-1 px-0.5">
+              Invalid hex colour
+            </p>
           )}
         </div>
       )}
@@ -274,14 +307,17 @@ function Swatch({
       role="option"
       aria-selected={isActive}
       title={color.label}
-      onMouseDown={(e) => { e.preventDefault(); onSelect(color.value); }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onSelect(color.value);
+      }}
       className={[
-        'relative w-[30px] h-[30px] rounded transition-transform',
-        'hover:scale-110 focus:outline-none',
-        'focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-blue-500',
-        isActive ? 'ring-2 ring-offset-1 ring-blue-500 scale-105' : '',
-        color.hasBorder ? 'border border-gray-300 dark:border-gray-500' : '',
-      ].join(' ')}
+        "relative w-[30px] h-[30px] rounded transition-transform",
+        "hover:scale-110 focus:outline-none",
+        "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-blue-500",
+        isActive ? "ring-2 ring-offset-1 ring-blue-500 scale-105" : "",
+        color.hasBorder ? "border border-gray-300 dark:border-gray-500" : "",
+      ].join(" ")}
       style={{ backgroundColor: color.value }}
     >
       {isActive && <CheckIcon light={isLight(color.value)} />}
@@ -296,14 +332,14 @@ function normalizeHex(hex: string): string {
 }
 
 function hexInputToPreview(input: string): string {
-  const raw = input.replace(/^#/, '');
+  const raw = input.replace(/^#/, "");
   if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw}`;
   if (/^[0-9a-f]{3}$/i.test(raw)) return `#${raw}`;
-  return 'transparent';
+  return "transparent";
 }
 
 function isLight(hex: string): boolean {
-  const h = hex.replace('#', '');
+  const h = hex.replace("#", "");
   if (h.length < 6) return true;
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
@@ -314,7 +350,12 @@ function isLight(hex: string): boolean {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ColorBar({ color }: { color: string }) {
-  return <span className="block w-4 h-[3px] rounded-sm" style={{ backgroundColor: color }} />;
+  return (
+    <span
+      className="block w-4 h-[3px] rounded-sm"
+      style={{ backgroundColor: color }}
+    />
+  );
 }
 
 function CheckIcon({ light }: { light: boolean }) {
@@ -323,7 +364,7 @@ function CheckIcon({ light }: { light: boolean }) {
       className="absolute inset-0 m-auto w-3.5 h-3.5 drop-shadow"
       viewBox="0 0 24 24"
       fill="none"
-      stroke={light ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.9)'}
+      stroke={light ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.9)"}
       strokeWidth={3.5}
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -337,19 +378,29 @@ function CheckIcon({ light }: { light: boolean }) {
 
 function BgColorIcon() {
   return (
-    <svg width="14" height="12" viewBox="0 0 24 22" fill="none" stroke="currentColor"
-         strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 20 L12 4 L20 20" />
-      <path d="M7.5 13 L16.5 13" />
-      <rect x="2" y="18" width="20" height="3" rx="1" fill="currentColor" stroke="none" />
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 1024 1024"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M766.4 744.3c43.7 0 79.4-36.2 79.4-80.5 0-53.5-79.4-140.8-79.4-140.8S687 610.3 687 663.8c0 44.3 35.7 80.5 79.4 80.5zm-377.1-44.1c7.1 7.1 18.6 7.1 25.6 0l256.1-256c7.1-7.1 7.1-18.6 0-25.6l-256-256c-.6-.6-1.3-1.2-2-1.7l-78.2-78.2a9.11 9.11 0 0 0-12.8 0l-48 48a9.11 9.11 0 0 0 0 12.8l67.2 67.2-207.8 207.9c-7.1 7.1-7.1 18.6 0 25.6l255.9 256zm12.9-448.6l178.9 178.9H223.4l178.8-178.9zM904 816H120c-4.4 0-8 3.6-8 8v80c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-80c0-4.4-3.6-8-8-8z" />
     </svg>
   );
 }
 
 function ChevronDownIcon() {
   return (
-    <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className="w-2.5 h-2.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="6 9 12 15 18 9" />
     </svg>
   );
@@ -357,8 +408,15 @@ function ChevronDownIcon() {
 
 function RemoveColorIcon() {
   return (
-    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className="w-4 h-4 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M7 21h14" />
       <path d="m5 11 9-9 7 7-9 9H5l-2-2 2-5Z" />
     </svg>

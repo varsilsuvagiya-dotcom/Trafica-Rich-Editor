@@ -35,21 +35,18 @@ export function EditorPage() {
       </header>
 
       {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
+      <div className="flex flex-1 flex-col lg:flex-row">
         {/* Editor panel */}
-        <div className="flex-1 flex flex-col p-4 lg:p-6 min-h-[400px] lg:min-h-0">
+        <div className="flex-1 flex flex-col p-4 lg:p-6">
           <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-3">
             Editor
           </p>
-          <div className="flex-1 overflow-auto">
-            <Editor
-              engine={engine}
-              placeholder="Start writing… (Ctrl+B bold, Ctrl+I italic, Ctrl+Z undo)"
-              onHTMLChange={setHtml}
-              onJSONChange={setJson}
-              className="h-full min-h-[320px]"
-            />
-          </div>
+          <Editor
+            engine={engine}
+            placeholder="Start writing… (Ctrl+B bold, Ctrl+I italic, Ctrl+Z undo)"
+            onHTMLChange={setHtml}
+            onJSONChange={setJson}
+          />
         </div>
 
         {/* Divider */}

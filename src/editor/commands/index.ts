@@ -244,6 +244,73 @@ const toggleListOfType = (listType: 'bullet_list' | 'ordered_list'): Command => 
 export const toggleBulletList: Command = toggleListOfType('bullet_list');
 export const toggleOrderedList: Command = toggleListOfType('ordered_list');
 
+// ─── Code Block Helpers ───────────────────────────────────────────────────────
+
+/**
+ * Exit code block: strip the trailing '\n', insert a paragraph after the block,
+ * move cursor there. Mirrors CKEditor double-Enter exit behavior.
+ */
+function exitCodeBlock(
+  engine: EditorEngineInterface,
+  doc: import('../../types').Document,
+  blockPath: number[],
+): boolean {
+  const block = getNodeAtPath(doc, blockPath) as BlockNode | null;
+  if (!block || block.type !== 'code_block') return false;
+
+  // Remove the trailing '\n' from the last text node.
+  const children = block.children as EditorNode[];
+  const lastTextIdx = [...children].reverse().findIndex((c) => c.type === 'text');
+  if (lastTextIdx === -1) return false;
+  const realIdx = children.length - 1 - lastTextIdx;
+  const lastText = children[realIdx] as TextNode;
+  if (!lastText.text.endsWith('\n')) return false;
+
+  const trimmedText = lastText.text.slice(0, -1);
+  const tr = createTransaction();
+
+  // Replace last text node content.
+  if (trimmedText.length === 0) {
+    // Remove empty text node entirely only if there are siblings; else keep with empty text.
+    if (children.length > 1) {
+      tr.steps.push({ type: 'delete_text', path: [...blockPath, realIdx], from: 0, to: lastText.text.length });
+    } else {
+      tr.steps.push({ type: 'delete_text', path: [...blockPath, realIdx], from: lastText.text.length - 1, to: lastText.text.length });
+    }
+  } else {
+    tr.steps.push({ type: 'delete_text', path: [...blockPath, realIdx], from: trimmedText.length, to: lastText.text.length });
+  }
+
+  // Insert paragraph after code block.
+  const parentPath = blockPath.slice(0, -1);
+  const blockIdx = blockPath[blockPath.length - 1];
+  const para = createParagraph();
+  tr.steps.push({ type: 'insert_node', parentPath, index: blockIdx + 1, node: para });
+  tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition([...parentPath, blockIdx + 1, 0], 0))));
+
+  engine.dispatch(tr);
+  return true;
+}
+
+/**
+ * Set or clear the language on the code_block under the cursor.
+ */
+export function setCodeBlockLanguage(language: string | null): Command {
+  return (engine) => {
+    const state = engine.getState();
+    const { doc } = state;
+    const selection = state.selection ?? makeCollapsedSelection(makePosition([0], 0));
+    const blockPath = findContentBlockPath(doc, selection.anchor.path);
+    if (!blockPath) return false;
+    const block = getNodeAtPath(doc, blockPath) as BlockNode | null;
+    if (!block || block.type !== 'code_block') return false;
+    const tr = createTransaction();
+    tr.steps.push(tr_setNodeAttrs(blockPath, { ...(block.attrs ?? {}), language: language ?? '' }));
+    engine.dispatch(tr);
+    return true;
+  };
+}
+
 // ─── Check List ───────────────────────────────────────────────────────────────
 
 /**
@@ -462,6 +529,20 @@ export const handleEnter: Command = (engine) => {
         );
       if (isEmpty) return exitCheckListItem(engine, doc, blockPath);
     }
+
+    // Enter inside code_block: insert '\n' instead of splitting into a new block.
+    // Double-Enter on an empty last line exits the code block (CKEditor behavior).
+    if (blockNode?.type === 'code_block') {
+      const fullText = (blockNode.children as EditorNode[])
+        .filter((c): c is TextNode => c.type === 'text')
+        .map((c) => c.text)
+        .join('');
+      // If block ends with '\n' and cursor is at the very end → exit to paragraph.
+      if (fullText.endsWith('\n') && cursor.offset === fullText.length) {
+        return exitCodeBlock(engine, doc, blockPath);
+      }
+      return insertText('\n')(engine);
+    }
   }
 
   // Compute the text offset within the block where the cursor sits.
@@ -472,6 +553,13 @@ export const handleEnter: Command = (engine) => {
 
   // Cursor lands at the start of the new (second) block.
   const newBlockPath = [...blockPath.slice(0, -1), blockPath[blockPath.length - 1] + 1];
+
+  // New check_list_item must always start unchecked regardless of parent.
+  const blockNode = getNodeAtPath(doc, blockPath) as BlockNode | null;
+  if (blockNode?.type === 'check_list_item') {
+    tr.steps.push(tr_setNodeAttrs(newBlockPath, { checked: false }));
+  }
+
   tr.steps.push(
     tr_setSelection(makeCollapsedSelection(makePosition([...newBlockPath, 0], 0))),
   );

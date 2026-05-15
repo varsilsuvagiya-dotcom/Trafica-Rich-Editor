@@ -174,20 +174,40 @@ function renderListItem(node: BlockNode, path: number[]): HTMLElement {
   return el;
 }
 
+const CODE_BLOCK_LANGUAGE_LABELS: Record<string, string> = {
+  plaintext: 'Plain text', c: 'C', cs: 'C#', cpp: 'C++', css: 'CSS',
+  diff: 'Diff', go: 'Go', html: 'HTML', java: 'Java', javascript: 'JavaScript',
+  json: 'JSON', php: 'PHP', python: 'Python', sql: 'SQL',
+  typescript: 'TypeScript', xml: 'XML',
+};
+
 function renderCodeBlock(node: BlockNode, path: number[]): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.dataset.blockPath = JSON.stringify(path);
+  wrapper.className = 'editor-code-block-wrapper';
+
+  const lang = (node.attrs?.language as string | undefined) ?? '';
+
+  // Language label header (CKEditor-style)
+  const header = document.createElement('div');
+  header.className = 'editor-code-block-header';
+  header.contentEditable = 'false';
+  header.textContent = CODE_BLOCK_LANGUAGE_LABELS[lang] ?? (lang || 'Plain text');
+  wrapper.appendChild(header);
+
   const pre = document.createElement('pre');
-  pre.dataset.blockPath = JSON.stringify(path);
   pre.className = 'editor-code-block';
+  if (lang) pre.dataset.language = lang;
 
   const code = document.createElement('code');
-  const lang = node.attrs?.language as string | undefined;
   if (lang) code.className = `language-${lang}`;
 
   renderChildren(node, path, code);
   if (code.innerHTML === '') code.appendChild(document.createElement('br'));
 
   pre.appendChild(code);
-  return pre;
+  wrapper.appendChild(pre);
+  return wrapper;
 }
 
 function renderImage(node: BlockNode, path: number[]): HTMLElement {
@@ -269,15 +289,31 @@ function renderCheckListItem(node: BlockNode, path: number[]): HTMLElement {
   const isChecked = !!node.attrs?.checked;
   li.className = `editor-check-list-item${isChecked ? ' editor-check-list-item--checked' : ''}`;
 
-  // Checkbox — contentEditable=false keeps it outside the editable flow
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.checked = isChecked;
-  checkbox.contentEditable = 'false';
-  checkbox.tabIndex = -1;
-  checkbox.className = 'editor-checkbox';
-  checkbox.dataset.checkPath = JSON.stringify(path);
-  li.appendChild(checkbox);
+  // CKEditor-style custom checkbox wrapper — contentEditable=false keeps it
+  // outside the editable flow so clicks don't move the cursor.
+  const checkboxWrapper = document.createElement('span');
+  checkboxWrapper.contentEditable = 'false';
+  checkboxWrapper.className = `editor-checkbox-wrapper${isChecked ? ' editor-checkbox-wrapper--checked' : ''}`;
+  checkboxWrapper.dataset.checkPath = JSON.stringify(path);
+  checkboxWrapper.setAttribute('role', 'checkbox');
+  checkboxWrapper.setAttribute('aria-checked', String(isChecked));
+  checkboxWrapper.setAttribute('tabindex', '-1');
+
+  // Inner checkmark SVG shown when checked
+  const checkmark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  checkmark.setAttribute('viewBox', '0 0 10 10');
+  checkmark.setAttribute('class', 'editor-checkbox-checkmark');
+  const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  polyline.setAttribute('points', '1.5 5 4 7.5 8.5 2.5');
+  polyline.setAttribute('fill', 'none');
+  polyline.setAttribute('stroke', 'white');
+  polyline.setAttribute('stroke-width', '1.5');
+  polyline.setAttribute('stroke-linecap', 'round');
+  polyline.setAttribute('stroke-linejoin', 'round');
+  checkmark.appendChild(polyline);
+  checkboxWrapper.appendChild(checkmark);
+
+  li.appendChild(checkboxWrapper);
 
   // Text content area
   const content = document.createElement('span');

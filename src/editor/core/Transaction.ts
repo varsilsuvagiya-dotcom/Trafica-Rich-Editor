@@ -37,6 +37,9 @@ import {
   setMarkOnRange,
   deleteRange,
   getNodeAtPath,
+  normalizeRange,
+  getCharOffsetInBlock,
+  getPosFromCharOffset,
 } from './DocumentModel';
 
 import type { TextNode, NodePosition } from '../../types';
@@ -121,16 +124,43 @@ export function applyTransaction(state: EditorState, tr: Transaction): EditorSta
         break;
 
       case 'add_mark':
-        doc = applyMarkToRange(doc, step.from, step.to, step.mark);
-        break;
-
       case 'remove_mark':
-        doc = removeMarkFromRange(doc, step.from, step.to, step.markType);
-        break;
+      case 'set_mark': {
+        // Capture char-based positions before text-node splits so we can
+        // restore the selection accurately after mergeAdjacentTextNodesInDoc.
+        const { from: nFrom, to: nTo } = normalizeRange(step.from, step.to);
+        const fromBlock = nFrom.path.slice(0, -1);
+        const toBlock = nTo.path.slice(0, -1);
+        const sameBlock = JSON.stringify(fromBlock) === JSON.stringify(toBlock);
+        const fromChar = getCharOffsetInBlock(doc, fromBlock, nFrom);
+        const toChar = sameBlock
+          ? getCharOffsetInBlock(doc, toBlock, nTo)
+          : getCharOffsetInBlock(doc, toBlock, nTo);
 
-      case 'set_mark':
-        doc = setMarkOnRange(doc, step.from, step.to, step.markType, step.mark);
+        if (step.type === 'add_mark') {
+          doc = applyMarkToRange(doc, step.from, step.to, step.mark);
+        } else if (step.type === 'remove_mark') {
+          doc = removeMarkFromRange(doc, step.from, step.to, step.markType);
+        } else {
+          doc = setMarkOnRange(doc, step.from, step.to, step.markType, step.mark);
+        }
+
+        // Fix up selection so it spans the (possibly re-pathed) marked region.
+        if (selection && !selection.isCollapsed) {
+          const newFrom = getPosFromCharOffset(doc, fromBlock, fromChar);
+          const newTo = getPosFromCharOffset(doc, toBlock, toChar);
+          // Preserve anchor/focus direction from the original selection.
+          const { from: origFrom } = normalizeRange(selection.anchor, selection.focus);
+          const anchorWasFirst =
+            JSON.stringify(origFrom) === JSON.stringify(selection.anchor);
+          selection = {
+            anchor: anchorWasFirst ? newFrom : newTo,
+            focus: anchorWasFirst ? newTo : newFrom,
+            isCollapsed: false,
+          };
+        }
         break;
+      }
 
       case 'set_selection':
         selection = step.selection;
