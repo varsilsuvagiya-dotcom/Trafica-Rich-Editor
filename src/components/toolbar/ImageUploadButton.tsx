@@ -140,7 +140,8 @@ export function ImageUploadButton({ engine, onUploadImage }: ImageUploadButtonPr
           className="absolute top-full left-0 mt-1 z-50 w-80
                      bg-white dark:bg-gray-800
                      border border-gray-200 dark:border-gray-600
-                     rounded-lg shadow-xl overflow-hidden"
+                     rounded-lg shadow-xl overflow-y-auto
+                     max-h-[min(480px,calc(100vh-var(--toolbar-bottom,80px)))]"
         >
           {/* Tabs */}
           <div className="flex border-b border-gray-200 dark:border-gray-600">

@@ -304,7 +304,7 @@
 .editor-root {
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* ─── Tables ──────────────────────────────────────────────────────────────── */
