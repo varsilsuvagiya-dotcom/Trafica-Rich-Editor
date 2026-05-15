@@ -206,6 +206,8 @@
 .editor-canvas .editor-text {
   /* Spans must be inline so text flows correctly */
   display: inline;
+  /* pre-wrap preserves trailing/multiple spaces so cursor advances on spacebar */
+  white-space: pre-wrap;
 }
 
 /* ─── Selection highlight ─────────────────────────────────────────────────── */

@@ -531,15 +531,20 @@ export function deleteRange(
 
   // Case 3: cross-block delete + join
   let result = doc;
-  // Trim from-block tail (from.offset → end of text in from-node, then remove later siblings in block)
   result = trimBlockAfter(result, fromBlockPath, from);
-  // Trim to-block head (start → to.offset)
-  const toBlockPathAfter = toBlockPath; // path indices in the to-block are unchanged so far
+  const toBlockPathAfter = toBlockPath;
   result = trimBlockBefore(result, toBlockPathAfter, to);
-  // Remove blocks strictly between from-block and to-block
   result = removeBlocksBetween(result, fromBlockPath, toBlockPathAfter);
-  // Join the to-block (now at fromBlockPath[last]+1) into the from-block
-  const joinPath = [...fromBlockPath.slice(0, -1), fromBlockPath[fromBlockPath.length - 1] + 1];
+
+  // For same-depth same-parent blocks, join at that level.
+  // For cross-depth (e.g. list_item[0,0] → paragraph[N]), join at the top level
+  // so the to-block's content merges into the from-block's top-level ancestor.
+  const sameLevelSameParent =
+    fromBlockPath.length === toBlockPath.length &&
+    JSON.stringify(fromBlockPath.slice(0, -1)) === JSON.stringify(toBlockPath.slice(0, -1));
+  const joinPath = sameLevelSameParent
+    ? [...fromBlockPath.slice(0, -1), fromBlockPath[fromBlockPath.length - 1] + 1]
+    : [fromBlockPath[0] + 1];
   result = joinBlocks(result, joinPath);
 
   return {
@@ -645,16 +650,27 @@ function trimBlockBefore(doc: Document, blockPath: number[], to: NodePosition): 
 }
 
 function removeBlocksBetween(doc: Document, fromBlockPath: number[], toBlockPath: number[]): Document {
-  // Only handles same-parent block ranges for now (top-level blocks).
-  if (fromBlockPath.length !== toBlockPath.length) return doc;
+  const fromTop = fromBlockPath[0];
+  const toTop   = toBlockPath[0];
+
+  // Cross-depth or different top-level ancestors: remove top-level blocks strictly
+  // between fromTop and toTop so the join step can merge the survivors.
+  if (fromBlockPath.length !== toBlockPath.length || fromTop !== toTop) {
+    let result = doc;
+    for (let i = toTop - 1; i > fromTop; i--) {
+      result = removeNodeAtPath(result, [i]);
+    }
+    return result;
+  }
+
+  // Same depth, same top-level ancestor: remove siblings strictly between the two paths.
   const parent = fromBlockPath.slice(0, -1);
   for (let i = 0; i < parent.length; i++) {
     if (parent[i] !== toBlockPath[i]) return doc;
   }
   const fromIdx = fromBlockPath[fromBlockPath.length - 1];
-  const toIdx = toBlockPath[toBlockPath.length - 1];
+  const toIdx   = toBlockPath[toBlockPath.length - 1];
   let result = doc;
-  // Remove indices fromIdx+1 ... toIdx-1 in reverse
   for (let i = toIdx - 1; i > fromIdx; i--) {
     result = removeNodeAtPath(result, [...parent, i]);
   }

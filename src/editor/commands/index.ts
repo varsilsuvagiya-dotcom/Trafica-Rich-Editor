@@ -174,40 +174,33 @@ const toggleListOfType = (listType: 'bullet_list' | 'ordered_list'): Command => 
 
   // Already inside a list of the target kind → unwrap back to a paragraph.
   if (block.type === 'list_item' && parentType === listType) {
-    // Replace the list with the list_item's children as paragraphs at the list's position.
     const listPath = parentPath;
     const grandParentPath = listPath.slice(0, -1);
     const listIdx = listPath[listPath.length - 1];
 
-    // Convert this list_item's content into a paragraph node.
     const paragraph: BlockNode = {
       type: 'paragraph',
       attrs: {},
       children: block.children,
     };
 
-    // Build new list with this item removed (keep siblings).
+    // Split remaining items into before/after so the list is properly divided
+    // around the extracted paragraph (CKEditor behavior).
     const listNode = parent as BlockNode;
-    const remainingItems = listNode.children.filter((_, i) => i !== blockIdx);
+    const beforeItems = (listNode.children as BlockNode[]).slice(0, blockIdx);
+    const afterItems  = (listNode.children as BlockNode[]).slice(blockIdx + 1);
 
     tr.steps.push({ type: 'delete_node', path: listPath });
     let insertIdx = listIdx;
-    if (remainingItems.length > 0) {
-      // Re-insert the list (without this item) at the same spot.
-      tr.steps.push({
-        type: 'insert_node',
-        parentPath: grandParentPath,
-        index: listIdx,
-        node: { ...listNode, children: remainingItems },
-      });
-      insertIdx = listIdx + 1;
+    if (beforeItems.length > 0) {
+      tr.steps.push({ type: 'insert_node', parentPath: grandParentPath, index: insertIdx, node: { ...listNode, children: beforeItems } });
+      insertIdx++;
     }
-    tr.steps.push({
-      type: 'insert_node',
-      parentPath: grandParentPath,
-      index: insertIdx,
-      node: paragraph,
-    });
+    tr.steps.push({ type: 'insert_node', parentPath: grandParentPath, index: insertIdx, node: paragraph });
+    insertIdx++;
+    if (afterItems.length > 0) {
+      tr.steps.push({ type: 'insert_node', parentPath: grandParentPath, index: insertIdx, node: { ...listNode, children: afterItems } });
+    }
     engine.dispatch(tr);
     return true;
   }
@@ -312,6 +305,54 @@ export function setCodeBlockLanguage(language: string | null): Command {
 }
 
 // ─── Check List ───────────────────────────────────────────────────────────────
+
+/**
+ * Exit a list_item from a bullet_list or ordered_list: extract it as a paragraph,
+ * splitting the surrounding list into before/after parts as needed.
+ * Mirrors CKEditor behavior for Backspace at start of first item / Enter on empty item.
+ */
+function exitListItem(
+  engine: EditorEngineInterface,
+  doc: import('../../types').Document,
+  blockPath: number[],
+): boolean {
+  const parentPath = blockPath.slice(0, -1);
+  const parent = getNodeAtPath(doc, parentPath) as BlockNode | null;
+  if (!parent || (parent.type !== 'bullet_list' && parent.type !== 'ordered_list')) return false;
+
+  const blockIdx  = blockPath[blockPath.length - 1];
+  const listIdx   = parentPath[parentPath.length - 1];
+  const grandPath = parentPath.slice(0, -1);
+
+  const listItem = getNodeAtPath(doc, blockPath) as BlockNode | null;
+  if (!listItem) return false;
+
+  const before = (parent.children as BlockNode[]).slice(0, blockIdx);
+  const after  = (parent.children as BlockNode[]).slice(blockIdx + 1);
+
+  const tr = createTransaction();
+
+  tr.steps.push({ type: 'delete_node', path: parentPath });
+
+  let insertAt = listIdx;
+  if (before.length > 0) {
+    tr.steps.push({ type: 'insert_node', parentPath: grandPath, index: insertAt, node: { ...parent, children: before } as BlockNode });
+    insertAt++;
+  }
+
+  const para: BlockNode = { type: 'paragraph', attrs: {}, children: listItem.children };
+  tr.steps.push({ type: 'insert_node', parentPath: grandPath, index: insertAt, node: para });
+  const paraPath = [...grandPath, insertAt];
+  insertAt++;
+
+  if (after.length > 0) {
+    tr.steps.push({ type: 'insert_node', parentPath: grandPath, index: insertAt, node: { ...parent, children: after } as BlockNode });
+  }
+
+  tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition([...paraPath, 0], 0))));
+  engine.dispatch(tr);
+  return true;
+}
 
 /**
  * Exit an empty check_list_item: extract it as a paragraph, splitting the
@@ -530,6 +571,15 @@ export const handleEnter: Command = (engine) => {
       if (isEmpty) return exitCheckListItem(engine, doc, blockPath);
     }
 
+    // Enter on an empty list_item exits the list (CKEditor behavior)
+    if (blockNode?.type === 'list_item') {
+      const isEmpty = blockNode.children.length === 0 ||
+        (blockNode.children as EditorNode[]).every(
+          (c) => c.type !== 'text' || (c as TextNode).text.length === 0,
+        );
+      if (isEmpty) return exitListItem(engine, doc, blockPath);
+    }
+
     // Enter inside code_block: insert '\n' instead of splitting into a new block.
     // Double-Enter on an empty last line exits the code block (CKEditor behavior).
     if (blockNode?.type === 'code_block') {
@@ -614,7 +664,13 @@ export const handleBackspace: Command = (engine) => {
 
   const blockIdx = blockPath[blockPath.length - 1];
   if (blockIdx === 0 && path.length === blockPath.length + 1 && path[blockPath.length] === 0) {
-    return true; // first text in first block; nothing to delete
+    // At start of first text in first content block.
+    // If it's a list_item, exit the list (CKEditor behavior: Backspace → paragraph above list).
+    const blockAtPath = getNodeAtPath(doc, blockPath) as BlockNode | null;
+    if (blockAtPath?.type === 'list_item') {
+      return exitListItem(engine, doc, blockPath);
+    }
+    return true; // first text in first top-level block; nothing to delete
   }
 
   const tr = createTransaction();
@@ -1033,6 +1089,210 @@ function jumpOverHR(engine: EditorEngineInterface, dir: 'down' | 'up'): boolean 
   engine.dispatch(tr);
   return true;
 }
+
+// ─── Forward Delete ───────────────────────────────────────────────────────────
+
+/**
+ * Handle the Delete key: delete one character forward, or if a range is selected
+ * delete the range, or if at the end of a block join the next block into this one.
+ */
+export const handleDelete: Command = (engine) => {
+  const state = engine.getState();
+  const { selection, doc } = state;
+  if (!selection) return false;
+
+  // Non-collapsed → same delete-range logic as Backspace
+  if (!selection.isCollapsed) {
+    const tr = createTransaction();
+    tr.steps.push(tr_deleteRange(selection.anchor, selection.focus));
+    engine.dispatch(tr);
+    return true;
+  }
+
+  const { path, offset } = selection.anchor;
+  const node = getNodeAtPath(doc, path);
+
+  // Delete forward within text node
+  if (node && isTextNode(node as EditorNode)) {
+    const textNode = node as TextNode;
+    if (offset < textNode.text.length) {
+      const tr = createTransaction();
+      tr.steps.push({ type: 'delete_text', path, from: offset, to: offset + 1 });
+      tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition(path, offset))));
+      engine.dispatch(tr);
+      return true;
+    }
+  }
+
+  // At end of text node / block → join next sibling block into current
+  const blockPath = findContentBlockPath(doc, path);
+  if (!blockPath) return true;
+
+  const parentPath = blockPath.slice(0, -1);
+  const blockIdx   = blockPath[blockPath.length - 1];
+  const nextPath   = [...parentPath, blockIdx + 1];
+
+  if (!getNodeAtPath(doc, nextPath)) {
+    // No next sibling at this level — try one level up (e.g. end of last list item)
+    if (parentPath.length > 0) {
+      const outerBlockPath = parentPath.slice(0, -1);
+      const outerIdx       = parentPath[parentPath.length - 1];
+      const outerNext      = [...outerBlockPath, outerIdx + 1];
+      if (getNodeAtPath(doc, outerNext)) {
+        const tr = createTransaction();
+        tr.steps.push(tr_joinBlocks(outerNext));
+        tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition(path, offset))));
+        engine.dispatch(tr);
+        return true;
+      }
+    }
+    return true; // nothing to delete
+  }
+
+  const tr = createTransaction();
+  tr.steps.push(tr_joinBlocks(nextPath));
+  tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition(path, offset))));
+  engine.dispatch(tr);
+  return true;
+};
+
+// ─── List Indent / Outdent ────────────────────────────────────────────────────
+
+/**
+ * Tab inside a list_item: nest the item one level deeper under the previous item.
+ * Mirrors CKEditor Tab behaviour in lists.
+ */
+export const indentListItem: Command = (engine) => {
+  const state = engine.getState();
+  const { doc, selection } = state;
+  if (!selection) return false;
+
+  const blockPath = findContentBlockPath(doc, selection.anchor.path);
+  if (!blockPath) return false;
+
+  const block = getNodeAtPath(doc, blockPath) as BlockNode | null;
+  if (!block || block.type !== 'list_item') return false;
+
+  const listPath = blockPath.slice(0, -1);
+  const list     = getNodeAtPath(doc, listPath) as BlockNode | null;
+  if (!list || (list.type !== 'bullet_list' && list.type !== 'ordered_list')) return false;
+
+  const itemIdx = blockPath[blockPath.length - 1];
+  if (itemIdx === 0) return false; // cannot indent first item
+
+  const prevItemPath = [...listPath, itemIdx - 1];
+  const prevItem     = getNodeAtPath(doc, prevItemPath) as BlockNode | null;
+  if (!prevItem) return false;
+
+  // Check if prevItem already ends with a nested list of the same type
+  const prevChildren = prevItem.children as EditorNode[];
+  const lastChild    = prevChildren[prevChildren.length - 1] as BlockNode | undefined;
+  const hasNested    = lastChild && !isTextNode(lastChild as EditorNode) && lastChild.type === list.type;
+
+  const newPrevChildren: EditorNode[] = hasNested
+    ? [
+        ...prevChildren.slice(0, -1),
+        { ...lastChild!, children: [...(lastChild!.children as BlockNode[]), block] },
+      ]
+    : [...prevChildren, { type: list.type, attrs: {}, children: [block] } as BlockNode];
+
+  // Nested item's path after transaction:
+  // prevItemPath + [newPrevChildren.length - 1 (nested list)] + [hasNested ? lastChild.children.length : 0]
+  const nestedListIdxInPrev = newPrevChildren.length - 1;
+  const nestedItemIdx       = hasNested ? (lastChild!.children as BlockNode[]).length : 0;
+  const nestedItemPath      = [...prevItemPath, nestedListIdxInPrev, nestedItemIdx];
+
+  const updatedPrev: BlockNode = { ...prevItem, children: newPrevChildren };
+
+  const tr = createTransaction();
+  // Delete current item first (higher index), then prev item, then re-insert prev
+  tr.steps.push({ type: 'delete_node', path: blockPath });
+  tr.steps.push({ type: 'delete_node', path: prevItemPath });
+  tr.steps.push({ type: 'insert_node', parentPath: listPath, index: itemIdx - 1, node: updatedPrev });
+  tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition([...nestedItemPath, 0], 0))));
+  engine.dispatch(tr);
+  return true;
+};
+
+/**
+ * Shift+Tab inside a nested list_item: promote it one level up.
+ * Mirrors CKEditor Shift+Tab behaviour in lists.
+ */
+export const outdentListItem: Command = (engine) => {
+  const state = engine.getState();
+  const { doc, selection } = state;
+  if (!selection) return false;
+
+  const blockPath = findContentBlockPath(doc, selection.anchor.path);
+  if (!blockPath) return false;
+
+  const block = getNodeAtPath(doc, blockPath) as BlockNode | null;
+  if (!block || block.type !== 'list_item') return false;
+
+  const nestedListPath = blockPath.slice(0, -1);
+  const nestedList     = getNodeAtPath(doc, nestedListPath) as BlockNode | null;
+  if (!nestedList || (nestedList.type !== 'bullet_list' && nestedList.type !== 'ordered_list')) return false;
+
+  // Must be inside another list_item (truly nested)
+  const parentItemPath = nestedListPath.slice(0, -1);
+  const parentItem     = getNodeAtPath(doc, parentItemPath) as BlockNode | null;
+  if (!parentItem || parentItem.type !== 'list_item') return false;
+
+  const parentListPath = parentItemPath.slice(0, -1);
+  const parentList     = getNodeAtPath(doc, parentListPath) as BlockNode | null;
+  if (!parentList) return false;
+
+  const itemIdx        = blockPath[blockPath.length - 1];
+  const nestedListIdx  = nestedListPath[nestedListPath.length - 1];
+  const parentItemIdx  = parentItemPath[parentItemPath.length - 1];
+
+  // Split the nested list around the extracted item
+  const beforeNested = (nestedList.children as BlockNode[]).slice(0, itemIdx);
+  const afterNested  = (nestedList.children as BlockNode[]).slice(itemIdx + 1);
+
+  const parentItemChildren = parentItem.children as EditorNode[];
+  let newParentChildren: EditorNode[];
+
+  if (beforeNested.length === 0 && afterNested.length === 0) {
+    // Remove nested list entirely
+    newParentChildren = [
+      ...parentItemChildren.slice(0, nestedListIdx),
+      ...parentItemChildren.slice(nestedListIdx + 1),
+    ];
+  } else if (beforeNested.length === 0) {
+    newParentChildren = [
+      ...parentItemChildren.slice(0, nestedListIdx),
+      { ...nestedList, children: afterNested },
+      ...parentItemChildren.slice(nestedListIdx + 1),
+    ];
+  } else if (afterNested.length === 0) {
+    newParentChildren = [
+      ...parentItemChildren.slice(0, nestedListIdx),
+      { ...nestedList, children: beforeNested },
+      ...parentItemChildren.slice(nestedListIdx + 1),
+    ];
+  } else {
+    // Split into two nested lists
+    newParentChildren = [
+      ...parentItemChildren.slice(0, nestedListIdx),
+      { ...nestedList, children: beforeNested },
+      { ...nestedList, children: afterNested },
+      ...parentItemChildren.slice(nestedListIdx + 1),
+    ];
+  }
+
+  const updatedParent: BlockNode = { ...parentItem, children: newParentChildren };
+  const insertIdx = parentItemIdx + 1; // extracted item goes right after parent item
+  const newBlockPath = [...parentListPath, insertIdx];
+
+  const tr = createTransaction();
+  tr.steps.push({ type: 'delete_node', path: parentItemPath });
+  tr.steps.push({ type: 'insert_node', parentPath: parentListPath, index: parentItemIdx, node: updatedParent });
+  tr.steps.push({ type: 'insert_node', parentPath: parentListPath, index: insertIdx, node: block });
+  tr.steps.push(tr_setSelection(makeCollapsedSelection(makePosition([...newBlockPath, 0], 0))));
+  engine.dispatch(tr);
+  return true;
+};
 
 // ─── Select All ───────────────────────────────────────────────────────────────
 

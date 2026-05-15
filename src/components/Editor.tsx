@@ -33,8 +33,11 @@ import {
 import {
   handleEnter,
   handleBackspace,
+  handleDelete,
   insertText,
   toggleCheckItemAt,
+  indentListItem,
+  outdentListItem,
 } from '../editor/commands';
 import { findContentBlockPath } from '../editor/core/DocumentModel';
 
@@ -343,6 +346,27 @@ export function Editor({
         return;
       }
 
+      // Ctrl+A — select all editor content
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        const container = containerRef.current;
+        if (container) {
+          const spans = container.querySelectorAll<HTMLElement>('[data-path]');
+          const first = spans[0];
+          const last = spans[spans.length - 1];
+          if (first && last) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.setStart(leafTextNode(first, 'first') ?? first, 0);
+            const lastLeaf = leafTextNode(last, 'last');
+            range.setEnd(lastLeaf ?? last, lastLeaf?.textContent?.length ?? 0);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+        }
+        return;
+      }
+
       // Delete/Backspace on a selected image
       if (selectedImagePath && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
@@ -353,7 +377,7 @@ export function Editor({
       // Any key clears image selection so typing resumes normally
       if (selectedImagePath) setSelectedImagePath(null);
 
-      // Tab inside code_block → insert 2 spaces instead of shifting focus.
+      // Tab inside code_block → insert 2 spaces; inside list → indent/outdent.
       if (e.key === 'Tab') {
         const { doc, selection: sel } = engine.getState();
         if (sel) {
@@ -362,6 +386,15 @@ export function Editor({
           if (block?.type === 'code_block') {
             e.preventDefault();
             insertText('  ')(engine);
+            return;
+          }
+          if (block?.type === 'list_item') {
+            e.preventDefault();
+            if (e.shiftKey) {
+              outdentListItem(engine);
+            } else {
+              indentListItem(engine);
+            }
             return;
           }
         }
@@ -383,9 +416,19 @@ export function Editor({
 
       if (e.key === 'Backspace') {
         e.preventDefault();
-
         handleBackspace(engine);
+        return;
+      }
 
+      if (e.key === 'Delete') {
+        e.preventDefault();
+        handleDelete(engine);
+        return;
+      }
+
+      if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        insertText('\n')(engine);
         return;
       }
     },
@@ -416,10 +459,14 @@ export function Editor({
           insertText(e.data)(engine);
           return;
         }
-        case 'insertParagraph':
-        case 'insertLineBreak': {
+        case 'insertParagraph': {
           e.preventDefault();
           handleEnter(engine);
+          return;
+        }
+        case 'insertLineBreak': {
+          e.preventDefault();
+          insertText('\n')(engine);
           return;
         }
         case 'deleteContentBackward':
@@ -994,6 +1041,14 @@ const _OPEN_ONLY_RE  = new RegExp(`^<(${BLOCK_TAGS})(?:\\s[^>]*)?>$`, 'i');
 const _CLOSE_ONLY_RE = new RegExp(`^<\\/(${BLOCK_TAGS})>$`, 'i');
 
 const _HR_RE = /^<hr(\s[^>]*)?\/?>$/i;
+
+function leafTextNode(el: HTMLElement, end: 'first' | 'last'): Text | null {
+  let node: Node = el;
+  while (node.hasChildNodes()) {
+    node = end === 'first' ? node.firstChild! : node.lastChild!;
+  }
+  return node.nodeType === Node.TEXT_NODE ? (node as Text) : null;
+}
 
 function prettyPrintHTML(html: string): string {
   // Insert newlines at block open/close boundaries, then indent line-by-line.

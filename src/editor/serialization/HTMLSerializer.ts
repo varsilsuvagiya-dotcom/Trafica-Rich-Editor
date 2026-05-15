@@ -37,8 +37,10 @@ function serializeBlock(node: BlockNode): string {
       const align = node.attrs?.align ? ` data-align="${node.attrs.align}"` : '';
       return `<h${l}${align}>${serializeChildren(node.children)}</h${l}>`;
     }
-    case 'blockquote':
-      return `<blockquote>${serializeChildren(node.children)}</blockquote>`;
+    case 'blockquote': {
+      const align = node.attrs?.align ? ` data-align="${node.attrs.align}"` : '';
+      return `<blockquote${align}>${serializeChildren(node.children)}</blockquote>`;
+    }
     case 'bullet_list':
       return `<ul>${serializeChildren(node.children)}</ul>`;
     case 'ordered_list':
@@ -53,7 +55,8 @@ function serializeBlock(node: BlockNode): string {
     }
     case 'code_block': {
       const lang = node.attrs?.language ? ` class="language-${node.attrs.language}"` : '';
-      return `<pre><code${lang}>${serializeChildren(node.children)}</code></pre>`;
+      const raw = node.children.map((c) => isTextNode(c) ? escapeHTML((c as TextNode).text) : '').join('');
+      return `<pre><code${lang}>${raw}</code></pre>`;
     }
     case 'image': {
       const src = escapeAttr(node.attrs?.src as string ?? '');
@@ -101,11 +104,15 @@ function serializeChildren(children: EditorNode[]): string {
 }
 
 function serializeTextNode(node: TextNode): string {
-  let text = escapeHTML(node.text);
-  for (const mark of node.marks) {
-    text = wrapWithMarkHTML(text, mark);
-  }
-  return text;
+  const parts = node.text.split('\n');
+  const serializedParts = parts.map((part) => {
+    let text = escapeHTML(part);
+    for (const mark of node.marks) {
+      text = wrapWithMarkHTML(text, mark);
+    }
+    return text;
+  });
+  return serializedParts.join('<br>');
 }
 
 function wrapWithMarkHTML(text: string, mark: Mark): string {
@@ -164,22 +171,38 @@ function parseHTMLNode(node: Node): BlockNode | null {
 
   switch (tag) {
     case 'p':
-    case 'div':
-      return { type: 'paragraph', attrs: {}, children: parseInlineChildren(el) };
-    case 'h1':
-      return { type: 'heading', attrs: { level: 1 }, children: parseInlineChildren(el) };
-    case 'h2':
-      return { type: 'heading', attrs: { level: 2 }, children: parseInlineChildren(el) };
-    case 'h3':
-      return { type: 'heading', attrs: { level: 3 }, children: parseInlineChildren(el) };
-    case 'h4':
-      return { type: 'heading', attrs: { level: 4 }, children: parseInlineChildren(el) };
-    case 'h5':
-      return { type: 'heading', attrs: { level: 5 }, children: parseInlineChildren(el) };
-    case 'h6':
-      return { type: 'heading', attrs: { level: 6 }, children: parseInlineChildren(el) };
-    case 'blockquote':
-      return { type: 'blockquote', attrs: {}, children: parseInlineChildren(el) };
+    case 'div': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'paragraph', attrs: align ? { align } : {}, children: parseInlineChildren(el) };
+    }
+    case 'h1': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 1, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'h2': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 2, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'h3': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 3, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'h4': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 4, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'h5': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 5, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'h6': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'heading', attrs: { level: 6, ...(align ? { align } : {}) }, children: parseInlineChildren(el) };
+    }
+    case 'blockquote': {
+      const align = el.getAttribute('data-align') as AlignmentType | null;
+      return { type: 'blockquote', attrs: align ? { align } : {}, children: parseInlineChildren(el) };
+    }
     case 'ul': {
       if (el.getAttribute('data-type') === 'checklist') {
         const items: BlockNode[] = Array.from(el.children).filter(c => c.tagName.toLowerCase() === 'li').map((li) => ({
@@ -192,7 +215,7 @@ function parseHTMLNode(node: Node): BlockNode | null {
       const items: BlockNode[] = Array.from(el.children).filter(c => c.tagName.toLowerCase() === 'li').map((li) => ({
         type: 'list_item' as const,
         attrs: {},
-        children: parseInlineChildren(li as HTMLElement),
+        children: parseListItemChildren(li as HTMLElement, 'bullet_list'),
       }));
       return { type: 'bullet_list', attrs: {}, children: items };
     }
@@ -200,7 +223,7 @@ function parseHTMLNode(node: Node): BlockNode | null {
       const items: BlockNode[] = Array.from(el.children).filter(c => c.tagName.toLowerCase() === 'li').map((li) => ({
         type: 'list_item' as const,
         attrs: {},
-        children: parseInlineChildren(li as HTMLElement),
+        children: parseListItemChildren(li as HTMLElement, 'ordered_list'),
       }));
       return { type: 'ordered_list', attrs: {}, children: items };
     }
@@ -273,6 +296,33 @@ function parseHTMLNode(node: Node): BlockNode | null {
   }
 }
 
+function parseListItemChildren(li: HTMLElement, _listType: 'bullet_list' | 'ordered_list'): EditorNode[] {
+  const children: EditorNode[] = [];
+  for (const child of Array.from(li.childNodes)) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const tag = (child as HTMLElement).tagName.toLowerCase();
+      if (tag === 'ul' || tag === 'ol') {
+        const nestedListType = tag === 'ul' ? 'bullet_list' : 'ordered_list';
+        const items: BlockNode[] = Array.from((child as HTMLElement).children)
+          .filter(c => c.tagName.toLowerCase() === 'li')
+          .map((nestedLi) => ({
+            type: 'list_item' as const,
+            attrs: {},
+            children: parseListItemChildren(nestedLi as HTMLElement, nestedListType),
+          }));
+        children.push({ type: nestedListType, attrs: {}, children: items });
+        continue;
+      }
+    }
+  }
+
+  const inlineNodes = parseInlineChildren(li);
+  if (inlineNodes.length > 0 || children.length === 0) {
+    return [...inlineNodes, ...children];
+  }
+  return children;
+}
+
 function parseInlineChildren(el: HTMLElement): TextNode[] {
   const results: TextNode[] = [];
 
@@ -285,6 +335,12 @@ function parseInlineChildren(el: HTMLElement): TextNode[] {
 
     const elem = node as HTMLElement;
     const tag = elem.tagName?.toLowerCase();
+
+    if (tag === 'br') {
+      results.push({ type: 'text', text: '\n', marks: [...marks] });
+      return;
+    }
+
     const newMarks = [...marks, ...getMarksForTag(tag, elem)];
 
     for (const child of Array.from(elem.childNodes)) {
