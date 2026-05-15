@@ -203,7 +203,13 @@ function renderCodeBlock(node: BlockNode, path: number[]): HTMLElement {
   if (lang) code.className = `language-${lang}`;
 
   renderChildren(node, path, code);
-  if (code.innerHTML === '') code.appendChild(document.createElement('br'));
+  if (code.innerHTML === '') {
+    code.appendChild(document.createElement('br'));
+  } else if ((code.textContent ?? '').endsWith('\n')) {
+    // Browser collapses a trailing \n in <pre>, making cursor invisible on the new line.
+    // Append a phantom \n (DOM-only) so the browser renders the cursor correctly.
+    code.appendChild(document.createTextNode('\n'));
+  }
 
   pre.appendChild(code);
   wrapper.appendChild(pre);
